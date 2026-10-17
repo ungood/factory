@@ -1,7 +1,6 @@
 # Checkouts that place manages. Each repo in place.toml needs a line here.
 /place/
 
-# Machine-specific config, and the link to a local build of place.
-/.local/
+# Machine-specific config.
 mise.local.toml
 place.local.toml

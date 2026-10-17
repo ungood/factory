@@ -18,8 +18,6 @@ run = "place sync"
 description = "Use a build of the ./place checkout instead of the released place"
 run = [
   "mise -C place run build",
-  "mkdir -p .local/place/bin",
-  "ln -sf ../../../place/target/debug/place .local/place/bin/place",
-  "mise link --force packslip:github.com/ungood/place@local .local/place",
+  "mise link --force packslip:github.com/ungood/place@local place/target/debug",
   "mise use --env local packslip:github.com/ungood/place@local",
 ]
