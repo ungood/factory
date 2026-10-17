@@ -1,0 +1,5 @@
+# Each repo in place.toml needs a line here.
+/place/
+
+mise.local.toml
+place.local.toml
