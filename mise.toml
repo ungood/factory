@@ -5,14 +5,12 @@ monorepo_root = true
 use_versions_host = false
 
 [monorepo]
-# Every repo with a mise config is a project, so `//...:build` covers them all.
 config_roots = ["*"]
 
 [tools]
 "packslip:github.com/ungood/place" = "0.1.0"
 
 [hooks]
-# Runs when you first trust this file, and on every cd into the workplace.
 enter = { task = "sync" }
 
 [tasks.sync]
