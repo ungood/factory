@@ -1,0 +1,17 @@
+[tools]
+"packslip:github.com/ungood/place" = "0.1.0"
+
+[hooks]
+# Runs when you first trust this file, and on every cd into the workplace.
+enter = { task = "sync" }
+
+[tasks.sync]
+description = "Clone and update the repos listed in place.toml"
+run = "place sync"
+
+[tasks.link]
+description = "Use a build of the ./place checkout instead of the released place"
+run = [
+  "mise -C place run link",
+  "mise use --env local packslip:github.com/ungood/place@local",
+]
