@@ -1,7 +1,12 @@
+monorepo_root = true
+
 [settings]
 # mise's versions service doesn't list new place releases yet, so ask GitHub directly.
 use_versions_host = false
 
+[monorepo]
+# Every repo with a mise config is a project, so `//...:build` covers them all.
+config_roots = ["*"]
 
 [tools]
 "packslip:github.com/ungood/place" = "0.1.0"
@@ -16,8 +21,8 @@ run = "place sync"
 
 [tasks.link]
 description = "Use a build of the ./place checkout instead of the released place"
+depends = ["//...:build"]
 run = [
-  "mise -C place run build",
   "mise link --force packslip:github.com/ungood/place@local place/target/debug",
   "mise use --env local packslip:github.com/ungood/place@local",
 ]
