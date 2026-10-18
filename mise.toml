@@ -9,6 +9,11 @@ config_roots = ["*"]
 
 [tools]
 "packslip:github.com/ungood/place" = "0.1.0"
+# The SDLC runs on a released marche, never the checkout being worked on, so a
+# broken marche can't break the factory that fixes it.
+"packslip:github.com/ungood/marche" = "0.2.0"
+# The Temporal CLI, whose dev server keeps the SDLC's runs.
+"aqua:temporalio/cli" = "1.9.1"
 
 [tasks.sync]
 description = "Clone and update the repos listed in place.toml"
@@ -21,3 +26,22 @@ run = [
   "mise link --force packslip:github.com/ungood/place@local place/target/debug",
   "mise use --env local packslip:github.com/ungood/place@local",
 ]
+
+[tasks."sdlc:server"]
+description = "Run the Temporal dev server that keeps the SDLC's runs"
+run = [
+  "mkdir -p ~/.local/state/marche",
+  "temporal server start-dev --db-filename ~/.local/state/marche/temporal.db",
+]
+
+[tasks."sdlc:worker"]
+description = "Run the marche worker that executes the SDLC's runs"
+run = "marche worker"
+
+[tasks.implement]
+description = "Take a GitHub issue to a draft pull request"
+usage = '''
+arg "<repo>" help="Path to the repo's checkout, such as place or ."
+arg "<issue>" help="The issue number"
+'''
+run = 'marche run sdlc/implement.yaml --input "{\"repo\": \"${usage_repo}\", \"issue\": ${usage_issue}}"'

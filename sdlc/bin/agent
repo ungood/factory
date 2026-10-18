@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Runs Claude on a GitHub issue in an Orca terminal, where a person can watch
+# it and take over, and waits until the agent writes its result file.
+#
+# Usage: agent <repo> <issue>
+#
+# <repo> is a path to a checkout, relative to the current directory. Prints
+# the result as JSON: {"worktree", "branch", "status", "title", "summary"}.
+# Exits non-zero when the agent reports it's blocked or the terminal exits
+# without a result.
+#
+# A retried step finds the worktree, terminal and result from the first
+# attempt and picks up where it left off, so a worker crash never starts a
+# second agent on the same issue.
+set -euo pipefail
+
+repo=$(git -C "$1" rev-parse --show-toplevel)
+issue=$2
+name="issue-$issue"
+state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
+result="$state/result.json"
+mkdir -p "$state"
+
+log() { echo "agent: $*" >&2; }
+
+repo_id=$(orca repo list --json |
+  jq -r --arg path "$repo" '.result.repos[] | select(.path == $path) | .id')
+if [ -z "$repo_id" ]; then
+  log "Orca doesn't know $repo. Add it with: orca repo add --path $repo"
+  exit 1
+fi
+
+# Read the issue first, so a wrong number fails before anything is created.
+nwo=$(gh repo view "$(git -C "$repo" remote get-url origin)" --json nameWithOwner -q .nameWithOwner)
+if [ ! -f "$result" ]; then
+  gh issue view "$issue" -R "$nwo" --json title,body \
+    --template '# {{.title}}{{"\n\n"}}{{.body}}{{"\n"}}' >"$state/issue.md"
+fi
+
+# Orca names the branch <git user>/<name> and the directory <name>.
+worktree=$(orca worktree list --repo "id:$repo_id" --json |
+  jq -c --arg name "$name" '[.result.worktrees[] | select(.path | endswith("/" + $name))][0] // empty')
+if [ -z "$worktree" ]; then
+  log "creating worktree $name"
+  worktree=$(orca worktree create --repo "id:$repo_id" --name "$name" --issue "$issue" \
+    --no-parent --setup skip --json | jq -c '.result.worktree')
+fi
+worktree_id=$(jq -r '.id' <<<"$worktree")
+path=$(jq -r '.path' <<<"$worktree")
+branch=$(jq -r '.branch | sub("^refs/heads/"; "")' <<<"$worktree")
+
+terminals() { orca terminal list --worktree "id:$worktree_id" --json | jq -c '.result.terminals'; }
+
+if [ ! -f "$result" ]; then
+  terminal=$(terminals | jq -r '[.[] | select(.agentIdentity == "claude")][0].handle // empty')
+  if [ -z "$terminal" ]; then
+    # Orca's worktrees live outside the workplace, so the workplace's
+    # untracked mise.local.toml doesn't reach them. Carry over the Claude
+    # account the source checkout uses.
+    config_dir=$(mise -C "$repo" env --json | jq -r '.CLAUDE_CONFIG_DIR // empty')
+    if [ -z "$config_dir" ]; then
+      log "$repo has no CLAUDE_CONFIG_DIR in its mise environment"
+      exit 1
+    fi
+
+    cat >"$state/task.md" <<EOF
+You're working on issue #$issue in $nwo, in this worktree on branch \`$branch\`. The issue follows this section.
+
+Write failing tests first wherever the repo has tests, then implement. Run \`mise run lint\` and \`mise run test\` if those tasks exist, and fix what fails. Commit your work with conventional commit messages. Don't push or open a pull request; the workflow does that after running its own checks.
+
+When you're done, write this JSON to \`$result\`:
+
+    {"status": "done", "title": "<conventional PR title>", "summary": "<Markdown summary for the PR>"}
+
+If you're blocked and need a person, write {"status": "blocked", "summary": "<what's blocking you>"} instead. A person may be watching this terminal and may take over; if they do, follow their lead.
+
+$(cat "$state/issue.md")
+EOF
+
+    log "starting Claude in $path"
+    terminal=$(terminals | jq -r '.[0].handle // empty')
+    if [ -z "$terminal" ]; then
+      terminal=$(orca terminal create --worktree "id:$worktree_id" --title "$name" --json |
+        jq -r '.result.terminal.handle')
+    fi
+    orca terminal send --terminal "$terminal" \
+      --text "env CLAUDE_CONFIG_DIR='$config_dir' mise x -- claude" --enter --json >/dev/null
+
+    # The shell counts as idle too, so wait for Claude to claim the terminal
+    # before waiting for its prompt.
+    for _ in $(seq 60); do
+      [ "$(terminals | jq -r --arg t "$terminal" '.[] | select(.handle == $t) | .agentIdentity')" = claude ] && break
+      sleep 1
+    done
+    ready=$(orca terminal wait --terminal "$terminal" --for tui-idle --timeout-ms 120000 --json |
+      jq -r '.result.wait.satisfied')
+    if [ "$ready" != true ]; then
+      log "Claude didn't become ready in $path"
+      exit 1
+    fi
+    orca terminal send --terminal "$terminal" \
+      --text "Read $state/task.md and do what it says." --enter --wait-submit 30 --json >/dev/null
+    orca worktree set --worktree "id:$worktree_id" --comment "implementing #$issue" \
+      --workspace-status in-progress --json >/dev/null || true
+  fi
+
+  log "waiting for $result"
+  while [ ! -f "$result" ]; do
+    exited=$(orca terminal wait --terminal "$terminal" --for exit --timeout-ms 10000 --json |
+      jq -r '.result.wait.satisfied')
+    if [ "$exited" = true ] && [ ! -f "$result" ]; then
+      log "the agent's terminal exited without writing $result"
+      exit 1
+    fi
+  done
+fi
+
+jq -c --arg worktree "$path" --arg branch "$branch" \
+  '{worktree: $worktree, branch: $branch} + .' "$result"
+status=$(jq -r '.status' "$result")
+if [ "$status" != "done" ]; then
+  log "the agent reported $status: $(jq -r '.summary' "$result")"
+  exit 1
+fi

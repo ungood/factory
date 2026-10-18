@@ -1,0 +1,42 @@
+document:
+  dsl: '1.0.4'
+  namespace: factory
+  name: implement
+  version: '0.1.0'
+  summary: Take a GitHub issue to a draft pull request that passes the repo's checks.
+do:
+  # Input: {"repo": "<path to a checkout>", "issue": <number>}
+  - remember:
+      set:
+        repo: ${ .repo }
+        issue: ${ .issue | tostring }
+      export:
+        as: '.'
+  - agent:
+      run:
+        shell:
+          command: sdlc/bin/agent "$1" "$2"
+          arguments:
+            - ${ $context.repo }
+            - ${ $context.issue }
+      output:
+        as: ${ fromjson }
+      export:
+        as: '$context + .'
+  - gate:
+      run:
+        shell:
+          command: sdlc/bin/gate "$1"
+          arguments:
+            - ${ $context.worktree }
+  - pullRequest:
+      run:
+        shell:
+          command: sdlc/bin/open-pr "$1" "$2" "$3" "$4"
+          arguments:
+            - ${ $context.worktree }
+            - ${ $context.issue }
+            - ${ $context.title }
+            - ${ $context.summary }
+      output:
+        as: '{ pullRequest: ., branch: $context.branch, worktree: $context.worktree }'
