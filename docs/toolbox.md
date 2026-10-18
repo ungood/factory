@@ -102,7 +102,7 @@ Deterministic checks come first: formatters, linters, static analysis, type chec
 - **Models:** no xAI; prefer not to use OpenAI.
 - **Agent environment:** [Orca](https://github.com/stablyai/orca) is the terminal and diff surface for agent work, with telemetry turned off. cmux is a close second. Paseo was a good fit but can't be used at work. See [ADEs](../research/ades.md).
 - **Orchestration:** hand work off through Orca terminals and worktrees, not by messaging other sessions.
-- **Workflows:** [marche](marche.md) runs long-lived agent pipelines. Workflows are written in Pkl, rendered to Serverless Workflow 1.0 YAML, and run by Zigflow on Temporal. See [Workflow Languages](../research/workflow-languages.md).
+- **Workflows:** [marche](marche.md) runs long-lived agent pipelines. Workflows are Open Workflow Specification YAML, written in Pkl from marche's M2, and run by marche's Rust interpreter on Temporal. Temporal's dev server runs on the laptop as a user service. See [Workflow Languages](../research/workflow-languages.md).
 - **Naming:** factory tools follow the *mise en place* kitchen theme of `mise`, `place` and `marche`.
 - **Review:** agent changes are reviewed in Orca's diff view, with inline comments sent back to the agent. See [Review Tools](../research/review-tools.md).
 - **Skills are project-agnostic:** project bindings go in the repo's agent docs, not in the skill.
@@ -124,5 +124,4 @@ Personal tools that don't affect what the factory produces:
 - What the factory's own dependency update workflow looks like.
 - Rust releases: release-plz (release PRs), or semantic-release with a Cargo plugin to match the TypeScript repos?
 - Which proposed treefmt formatters earn a slot, and is `treefmt.toml` or treefmt-nix the config?
-- Whether to stay on Ghostty outside Orca, and whether Orca's CLI covers what marche needs: see [Terminal Orchestration](../research/terminal-orchestration.md).
-- Whether Temporal is acceptable on a laptop: see [marche](marche.md).
+- Whether to stay on Ghostty outside Orca, and whether Orca's CLI covers what an agent shim for marche needs: see [Terminal Orchestration](../research/terminal-orchestration.md).
