@@ -1,6 +1,6 @@
 # marche
 
-`marche` is the factory's workflow engine. It runs [Open Workflow Specification](https://github.com/open-workflow-specification/specification) definitions as durable workflows, with marche's own interpreter running as a Temporal workflow on Temporal's Rust SDK. It's a general engine: agents are ordinary shell steps, and anything specific to software delivery lives in the workflows.
+`marche` is the factory's workflow engine. It runs [Open Workflow Specification](https://github.com/open-workflow-specification/specification) definitions as durable workflows, with marche's own interpreter running as a Temporal workflow on Temporal's Rust SDK. It's a general engine: agents are ordinary shell steps, and anything specific to software delivery lives in the workflows. [SDLC](sdlc.md) describes the workflows planned for it.
 
 It lives in [ungood/marche](https://github.com/ungood/marche). The design is in its [docs/design.md](https://github.com/ungood/marche/blob/main/docs/design.md), and the work is tracked in its issues. The architecture was settled on 2026-10-17, replacing an earlier plan to run definitions with Zigflow. [Workflow Languages](../research/workflow-languages.md) is the dated research behind the choice of language.
 
@@ -8,10 +8,9 @@ It lives in [ungood/marche](https://github.com/ungood/marche). The design is in 
 
 From "ça marche!", the kitchen call that an order is accepted and should be fired. It follows the *mise en place* naming of `mise` (tools) and `place` (workspace): after mise en place comes service, and marche runs it.
 
-Related names, not yet decided:
+A related name, not yet decided:
 
 - **`commis`:** the agent shim CLI that a workflow step could call to run an agent, which would live outside marche. Junior cooks carry out the tasks they're given.
-- **`fond`:** the shared Pkl package of base workflows that repos extend. Stocks are the base that sauces are built from.
 
 ### Availability
 

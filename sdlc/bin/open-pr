@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Pushes an agent's branch and opens a draft pull request that closes the
+# issue. Prints the pull request's URL. If the branch already has a pull
+# request, prints its URL instead.
+#
+# Usage: open-pr <worktree> <issue> <title> <summary>
+set -euo pipefail
+
+cd "$1"
+issue=$2
+title=$3
+summary=$4
+
+git push --quiet --set-upstream origin HEAD >&2
+if url=$(gh pr view --json url -q .url 2>/dev/null); then
+  echo "$url"
+  exit 0
+fi
+gh pr create --draft --title "$title" --body "$(printf '%s\n\nCloses #%s\n' "$summary" "$issue")"

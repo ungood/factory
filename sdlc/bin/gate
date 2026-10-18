@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Runs the deterministic checks on an agent's worktree, without trusting the
+# agent's own report that they pass.
+#
+# Usage: gate <worktree>
+#
+# Fails when the worktree has uncommitted changes, has no commits beyond the
+# default branch, or fails the repo's lint or test task.
+set -euo pipefail
+
+cd "$1"
+log() { echo "gate: $*" >&2; }
+
+if [ -n "$(git status --porcelain)" ]; then
+  log "the worktree has uncommitted changes"
+  git status --short >&2
+  exit 1
+fi
+
+base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || echo origin/main)
+if [ -z "$(git rev-list "$base..HEAD")" ]; then
+  log "there are no commits beyond $base"
+  exit 1
+fi
+
+# A new worktree is a new path, which mise hasn't been told to trust.
+mise trust --quiet .
+for task in lint test; do
+  if mise tasks info "$task" >/dev/null 2>&1; then
+    log "mise run $task"
+    mise run "$task" >&2
+  fi
+done
