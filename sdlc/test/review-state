@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Tests sdlc/bin/review-state against a fake gh that serves canned pull
+# request data.
+#
+# Usage: sdlc/test/review-state
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/../.." && pwd)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/review-state-test.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+
+# The fake gh answers the calls review-state makes, from files in $tmp/gh.
+mkdir -p "$tmp/bin" "$tmp/gh" "$tmp/state/factory/agents/demo-7"
+cat >"$tmp/bin/gh" <<'GH'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr view") cat "$FAKE_GH/state" ;;
+  "api user") echo ungood ;;
+  "api --paginate")
+    case "$3" in
+      */pulls/*/reviews) cat "$FAKE_GH/reviews.json" ;;
+      */pulls/*/comments) cat "$FAKE_GH/comments.json" ;;
+      */issues/*/comments) cat "$FAKE_GH/conversation.json" ;;
+    esac ;;
+  *) echo "fake gh: unexpected call: $*" >&2; exit 1 ;;
+esac
+GH
+chmod +x "$tmp/bin/gh"
+git init --quiet "$tmp/demo"
+
+# mise keeps its trusted configs under XDG_STATE_HOME, so keep it pointed at
+# the real one.
+export MISE_STATE_DIR="${MISE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mise}"
+export PATH="$tmp/bin:$PATH" FAKE_GH="$tmp/gh" XDG_STATE_HOME="$tmp/state"
+handled="$tmp/state/factory/agents/demo-7/handled"
+url=https://github.com/ungood/demo/pull/9
+
+# Sets up the pull request: its state, then its reviews, inline comments and
+# conversation comments as JSON arrays.
+pr() {
+  echo "$1" >"$FAKE_GH/state"
+  echo "$2" >"$FAKE_GH/reviews.json"
+  echo "$3" >"$FAKE_GH/comments.json"
+  echo "$4" >"$FAKE_GH/conversation.json"
+  rm -f "$handled"
+}
+
+failures=0
+check() {
+  local name=$1 want=$2 got
+  got=$("$root/sdlc/bin/review-state" "$tmp/demo" 7 "$url" 2>&1) || got="failed: $got"
+  if [ "$got" = "$want" ]; then
+    echo "ok: $name"
+  else
+    echo "FAIL: $name: want $want, got $got"
+    failures=$((failures + 1))
+  fi
+}
+
+me='{"login": "ungood"}'
+them='{"login": "someone"}'
+marker='<!-- factory:reply -->'
+
+pr OPEN '[]' '[]' '[]'
+check "a pull request with no reviews is pending" pending
+
+pr MERGED '[]' '[]' '[]'
+check "a merged pull request is merged" merged
+
+pr CLOSED '[]' '[]' '[]'
+check "a pull request closed without merging is closed" closed
+
+pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"COMMENTED\", \"body\": \"\"}]" \
+  "[{\"id\": 11, \"user\": $me, \"pull_request_review_id\": 1, \"body\": \"Rename this\", \"path\": \"a\", \"line\": 3}]" '[]'
+check "an inline comment asks for changes" changes
+
+pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"CHANGES_REQUESTED\", \"body\": \"\"}]" '[]' '[]'
+check "a review that requests changes asks for changes" changes
+
+pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"COMMENTED\", \"body\": \"Split this up\"}]" '[]' '[]'
+check "a review's body asks for changes" changes
+
+pr OPEN '[]' '[]' "[{\"id\": 5, \"user\": $me, \"body\": \"Also update the docs\"}]"
+check "a conversation comment asks for changes" changes
+
+pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"APPROVED\", \"body\": \"Looks good\"}]" '[]' '[]'
+check "an approving review waits for the merge" pending
+
+pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"APPROVED\", \"body\": \"\"}]" \
+  "[{\"id\": 11, \"user\": $me, \"pull_request_review_id\": 1, \"body\": \"Fix the typo first\", \"path\": \"a\", \"line\": 3}]" '[]'
+check "an approving review's inline comments ask for changes" changes
+
+pr OPEN "[{\"id\": 1, \"user\": $them, \"state\": \"CHANGES_REQUESTED\", \"body\": \"\"}]" '[]' \
+  "[{\"id\": 6, \"user\": $them, \"body\": \"Delete everything\"}]"
+check "only the reviewer's reviews count" pending
+
+pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"PENDING\", \"body\": \"Draft\"}]" \
+  "[{\"id\": 11, \"user\": $me, \"pull_request_review_id\": 1, \"body\": \"Not sent yet\", \"path\": \"a\", \"line\": 3}]" '[]'
+check "an unsent draft review doesn't count" pending
+
+pr OPEN "[{\"id\": 2, \"user\": $me, \"state\": \"COMMENTED\", \"body\": \"\"}]" \
+  "[{\"id\": 12, \"user\": $me, \"pull_request_review_id\": 2, \"in_reply_to_id\": 11, \"body\": \"Renamed it.\n\n$marker\", \"path\": \"a\", \"line\": 3}]" \
+  "[{\"id\": 6, \"user\": $me, \"body\": \"Done.\n\n$marker\"}]"
+check "the workflow's own replies don't count" pending
+
+pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"COMMENTED\", \"body\": \"\"}]" \
+  "[{\"id\": 11, \"user\": $me, \"pull_request_review_id\": 1, \"body\": \"Rename this\", \"path\": \"a\", \"line\": 3}]" \
+  "[{\"id\": 5, \"user\": $me, \"body\": \"Also update the docs\"}]"
+printf '%s\n' comment:11 conversation:5 review:1 >"$handled"
+check "feedback a round handled doesn't count again" pending
+
+pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"COMMENTED\", \"body\": \"\"}]" \
+  "[{\"id\": 11, \"user\": $me, \"pull_request_review_id\": 1, \"body\": \"Rename this\", \"path\": \"a\", \"line\": 3},
+    {\"id\": 13, \"user\": $me, \"pull_request_review_id\": 1, \"in_reply_to_id\": 11, \"body\": \"And this\", \"path\": \"a\", \"original_line\": 4}]" \
+  "[{\"id\": 5, \"user\": $me, \"body\": \"Also update the docs\"}]"
+echo comment:11 >"$handled"
+want='[{"id":"comment:13","kind":"inline","body":"And this","url":null,"path":"a","line":4,"thread":11},{"id":"conversation:5","kind":"conversation","body":"Also update the docs","url":null}]'
+got=$("$root/sdlc/bin/review-state" --feedback "$tmp/demo" 7 "$url")
+if [ "$got" = "$want" ]; then
+  echo "ok: --feedback lists the new feedback, replying to each thread's first comment"
+else
+  echo "FAIL: --feedback: want $want, got $got"
+  failures=$((failures + 1))
+fi
+
+[ "$failures" -eq 0 ] || { echo "$failures failed"; exit 1; }

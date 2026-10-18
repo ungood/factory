@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Cleans up after an implement run whose pull request is merged: marks the
+# Orca worktree completed, closes the agent's terminals, removes the worktree
+# and deletes the local branch. The run's state directory stays, as the
+# record of the run.
+#
+# Usage: cleanup <repo> <worktree> <branch>
+#
+# <repo> is the path to the checkout the run worked on, relative to the
+# current directory. A worktree with uncommitted changes, or commits its
+# remote branch doesn't have, stays where it is, with its terminals. The step
+# never fails the run: anything it can't remove is logged, and the script
+# exits zero.
+set -uo pipefail
+
+log() { echo "cleanup: $*" >&2; }
+trap 'exit 0' EXIT
+
+repo=$(git -C "$1" rev-parse --show-toplevel) || exit 0
+worktree=$2
+branch=$3
+
+if [ -d "$worktree" ]; then
+  orca worktree set --worktree "path:$worktree" --comment "merged" \
+    --workspace-status completed --json >/dev/null || log "couldn't update the worktree $worktree in Orca"
+  if [ -n "$(git -C "$worktree" status --porcelain)" ]; then
+    log "leaving $worktree in place, because it has uncommitted changes:"
+    git -C "$worktree" status --short >&2
+    exit 0
+  fi
+  # A merged branch's remote is deleted with the merge, so compare with what
+  # was pushed rather than with the remote branch.
+  if [ -n "$(git -C "$worktree" rev-list HEAD --not --remotes 2>/dev/null)" ]; then
+    log "leaving $worktree in place, because it has commits that were never pushed"
+    exit 0
+  fi
+
+  orca terminal close --worktree "path:$worktree" --all --json >/dev/null ||
+    log "couldn't close the terminals of $worktree"
+  if orca worktree rm --worktree "path:$worktree" --json >/dev/null; then
+    log "removed $worktree"
+  else
+    log "couldn't remove the worktree $worktree"
+  fi
+fi
+
+# Orca deletes the branch with the worktree only when it can prove it's
+# merged, which a squash or rebase merge's branch isn't.
+if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
+  if git -C "$repo" worktree list --porcelain | grep -qxF "branch refs/heads/$branch"; then
+    log "keeping the branch $branch, which is still checked out"
+  elif git -C "$repo" branch --quiet -D "$branch" >&2; then
+    log "deleted the branch $branch"
+  else
+    log "couldn't delete the branch $branch"
+  fi
+fi

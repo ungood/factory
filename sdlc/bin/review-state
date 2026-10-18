@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Reports where an implement run's pull request stands with its reviewer, the
+# person whose GitHub account the workflow runs as.
+#
+# Usage: review-state [--feedback] <repo> <issue> <pull request>
+#
+# <repo> is the path to the checkout the run worked on, relative to the
+# current directory. <pull request> is the pull request's URL. Prints one of:
+#
+# - pending: nothing new from the reviewer since the last round
+# - changes: new review comments, or a review that requests changes
+# - merged: the pull request was merged
+# - closed: the pull request was closed without merging
+#
+# The workflow never merges. Whoever merges the pull request approves it, and
+# the forge decides who may. An approving review without a merge is still
+# pending, though comments that come with it are feedback.
+#
+# With --feedback, prints the new feedback instead, as a JSON array of
+# {"id", "kind", "body", "url"}, where an inline comment adds "path", "line"
+# and "thread", the comment to reply to. Feedback a round has handled is
+# listed by ID in the run's state directory, in `handled`. The workflow's own
+# replies carry a marker, so they're never mistaken for feedback.
+set -euo pipefail
+
+mode=state
+if [ "${1-}" = --feedback ]; then
+  mode=feedback
+  shift
+fi
+repo=$(git -C "$1" rev-parse --show-toplevel)
+issue=$2
+# The previous step's output may end in a newline.
+url=$(tr -d "[:space:]" <<<"$3")
+state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
+
+if ! [[ "$url" =~ ^https://github\.com/([^/]+/[^/]+)/pull/([0-9]+)$ ]]; then
+  echo "review-state: $url isn't a pull request URL" >&2
+  exit 1
+fi
+nwo=${BASH_REMATCH[1]}
+number=${BASH_REMATCH[2]}
+
+pr_state=$(gh pr view "$url" --json state -q .state)
+if [ "$mode" = state ] && [ "$pr_state" != OPEN ]; then
+  if [ "$pr_state" = MERGED ]; then echo merged; else echo closed; fi
+  exit 0
+fi
+
+reviewer=$(gh api user -q .login)
+handled=$(if [ -f "$state/handled" ]; then jq -R . "$state/handled" | jq -cs .; else echo '[]'; fi)
+# --paginate prints one array per page, so slurp the pages into one.
+fetch() { gh api --paginate "$1" | jq -cs 'add // []'; }
+reviews=$(fetch "repos/$nwo/pulls/$number/reviews")
+comments=$(fetch "repos/$nwo/pulls/$number/comments")
+conversation=$(fetch "repos/$nwo/issues/$number/comments")
+
+# shellcheck disable=SC2016 # $vars are jq's, not the shell's.
+items=$(jq -cn \
+  --arg reviewer "$reviewer" \
+  --argjson handled "$handled" \
+  --argjson reviews "$reviews" \
+  --argjson comments "$comments" \
+  --argjson conversation "$conversation" '
+  def ours: (.body // "") | contains("<!-- factory:reply -->");
+  # A pending review is the reviewer'"'"'s unsent draft, which GitHub shows
+  # only to its author: the account the workflow runs as.
+  ([$reviews[] | select(.state == "PENDING") | .id]) as $drafts
+  | [
+      ($reviews[]
+        | select(.user.login == $reviewer and (ours | not))
+        # An approval waits for the merge, and an empty review only holds
+        # inline comments, which count on their own.
+        | select(.state == "CHANGES_REQUESTED" or (.state == "COMMENTED" and (.body // "") != ""))
+        | {id: "review:\(.id)", kind: "review", body: (.body // ""), url: .html_url}),
+      ($comments[]
+        | select(.user.login == $reviewer and (ours | not))
+        | select(.pull_request_review_id as $r | $drafts | index($r) | not)
+        | {id: "comment:\(.id)", kind: "inline", body, url: .html_url,
+           path, line: (.line // .original_line), thread: (.in_reply_to_id // .id)}),
+      ($conversation[]
+        | select(.user.login == $reviewer and (ours | not))
+        | {id: "conversation:\(.id)", kind: "conversation", body, url: .html_url})
+    ]
+  | map(select(.id as $id | $handled | index($id) | not))')
+
+if [ "$mode" = feedback ]; then
+  echo "$items"
+elif [ "$(jq length <<<"$items")" -gt 0 ]; then
+  echo changes
+else
+  echo pending
+fi

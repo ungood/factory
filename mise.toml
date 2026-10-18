@@ -33,9 +33,13 @@ run = [
 description = "Lint the Markdown, the SDLC's scripts and its workflows"
 run = [
   "rumdl check",
-  "shellcheck sdlc/bin/*",
+  "shellcheck sdlc/bin/* sdlc/test/*",
   "for f in sdlc/*.yaml; do marche validate \"$f\" || exit 1; done",
 ]
+
+[tasks.test]
+description = "Test the SDLC's scripts"
+run = "for t in sdlc/test/*; do \"$t\" || exit 1; done"
 
 [tasks."sdlc:server"]
 description = "Run the Temporal dev server that keeps the SDLC's runs"
@@ -49,7 +53,7 @@ description = "Run the marche worker that executes the SDLC's runs"
 run = "marche worker"
 
 [tasks.implement]
-description = "Take a GitHub issue to a draft pull request"
+description = "Take a GitHub issue through a pull request and its review until a person merges it"
 usage = '''
 arg "<repo>" help="Path to the repo's checkout, such as place or ."
 arg "<issue>" help="The issue number"

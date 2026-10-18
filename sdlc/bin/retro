@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Reviews how an implement run went and files up to three issues that would
-# make the next run go better, each labeled `retro` and linking the PR.
+# make the next run go better, each labeled `retro` and linking the PR. It
+# runs once the review is over, so it sees each round of review feedback too.
 #
 # Usage: retro <repo> <issue> <worktree> <pull request> <run>
 #
@@ -50,6 +51,10 @@ fi
 inputs=$(mktemp -d "${TMPDIR:-/tmp}/retro.XXXXXX")
 cp "$state/issue.md" "$inputs/issue.md"
 cp "$state/result.json" "$inputs/result.json"
+# Each round of review feedback, and the agent's result for it.
+for f in "$state"/feedback-*.json "$state"/result-*.json; do
+  [ ! -f "$f" ] || cp "$f" "$inputs/"
+done
 gh pr diff "$pr" >"$inputs/pr.diff"
 # Claude keeps a worktree's sessions in a directory named after its path.
 transcripts="$config_dir/projects/${worktree//[^A-Za-z0-9]/-}"
@@ -89,12 +94,13 @@ schema=$(jq -cn --arg factory "$factory_nwo" --arg repo "$repo_nwo" '{
 
 prompt=$(
   cat <<EOF
-You're reviewing how a run of the factory's implement workflow went, so that the next run goes better. The run took issue #$issue in $repo_nwo to the pull request $pr. An agent worked in $worktree, then a gate ran the repo's checks, then the workflow opened the pull request.
+You're reviewing how a run of the factory's implement workflow went, so that the next run goes better. The run took issue #$issue in $repo_nwo to the pull request $pr. An agent worked in $worktree, then a gate ran the repo's checks, then the workflow opened the pull request. Then the run waited for the reviewer: each round of their feedback went back to the same agent, the gate ran again, and the workflow pushed and posted the agent's replies, until the reviewer merged the pull request, which is their approval, or closed it.
 
 The run's record is in the current directory:
 
 - \`issue.md\`: the issue, which is also the end of the agent's task.
 - \`result.json\`: the result file the agent wrote.
+- \`feedback-<n>.json\` and \`result-<n>.json\`, if there are any: round <n>'s review feedback, which the reviewer wrote, and the agent's result for it, with its replies. The first round of feedback is round 2.
 - \`pr.diff\`: the pull request's diff.
 - \`transcripts/\`: the agent's Claude session transcripts for the worktree, as JSONL. They can be large, so search them rather than reading them whole.
 - \`run.json\`: the marche run's tasks, with their outputs and errors.
@@ -108,6 +114,7 @@ Look for friction in the run:
 - what the gate caught
 - where the task, the issue or the scripts were unclear
 - what a person had to fix by hand, which shows in the transcript as a person typing into the session
+- what the reviewer asked to change that the agent could have got right the first time
 
 Turn the friction into at most three proposed issues, each a bug to fix or a feature to add, that would have prevented it. Propose only what the evidence supports, and propose none if the run went smoothly. A bad or duplicate issue costs more than a missing one.
 

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Pushes a round of review fixes and posts the agent's replies to the
+# reviewer's feedback, then moves the run's Orca worktree back to in-review.
+#
+# Usage: reply <repo> <issue> <worktree> <pull request> <round>
+#
+# <repo> is the path to the checkout the run worked on, relative to the
+# current directory. The replies come from result-<round>.json in the run's
+# state directory, and each answers an item of feedback-<round>.json: in its
+# thread for an inline comment, or as a comment on the pull request that
+# quotes the feedback otherwise. Every reply carries a marker, so
+# review-state doesn't take it for new feedback. A retried step doesn't post
+# a reply twice. Fails only when the push fails.
+set -euo pipefail
+
+repo=$(git -C "$1" rev-parse --show-toplevel)
+issue=$2
+worktree=$3
+url=$(tr -d "[:space:]" <<<"$4")
+round=$5
+state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
+feedback="$state/feedback-$round.json"
+result="$state/result-$round.json"
+posted="$state/replied-$round"
+marker='<!-- factory:reply -->'
+
+log() { echo "reply: $*" >&2; }
+
+git -C "$worktree" push --quiet origin HEAD >&2
+
+[[ "$url" =~ ^https://github\.com/([^/]+/[^/]+)/pull/([0-9]+)$ ]]
+nwo=${BASH_REMATCH[1]}
+number=${BASH_REMATCH[2]}
+touch "$posted"
+
+jq -c '.replies // [] | .[]' "$result" | while read -r reply; do
+  id=$(jq -r '.id' <<<"$reply")
+  if grep -qxF "$id" "$posted"; then
+    continue
+  fi
+  item=$(jq -c --arg id "$id" '.[] | select(.id == $id)' "$feedback")
+  if [ -z "$item" ]; then
+    log "the agent replied to $id, which wasn't in this round's feedback"
+    continue
+  fi
+  body=$(printf '%s\n\n%s\n' "$(jq -r '.body' <<<"$reply")" "$marker")
+  if [ "$(jq -r '.kind' <<<"$item")" = inline ]; then
+    thread=$(jq -r '.thread' <<<"$item")
+    ok=$(gh api -X POST "repos/$nwo/pulls/$number/comments/$thread/replies" -f body="$body" -q .html_url) || ok=
+  else
+    quote=$(jq -r '.body | split("\n") | map("> " + .) | join("\n")' <<<"$item")
+    ok=$(gh pr comment "$url" --body "$(printf '%s\n\n%s' "$quote" "$body")") || ok=
+  fi
+  if [ -n "$ok" ]; then
+    echo "$id" >>"$posted"
+  else
+    log "couldn't reply to $id"
+  fi
+done
+
+orca worktree set --worktree "path:$worktree" --comment "PR #$number is ready for another review (round $round)" \
+  --workspace-status in-review --unread --json >/dev/null || log "couldn't update the worktree $worktree in Orca"
