@@ -20,7 +20,10 @@
 # {"id", "kind", "body", "url"}, where an inline comment adds "path", "line"
 # and "thread", the comment to reply to. Feedback a round has handled is
 # listed by ID in the run's state directory, in `handled`. The workflow's own
-# replies carry a marker, so they're never mistaken for feedback.
+# replies carry a marker, so they're never mistaken for feedback. Once the
+# pull request is merged or closed, --feedback still lists what no round
+# handled, such as a review left with the merge, for the retrospective, and
+# an approving review's body counts too.
 set -euo pipefail
 
 mode=state
@@ -58,6 +61,7 @@ conversation=$(fetch "repos/$nwo/issues/$number/comments")
 # shellcheck disable=SC2016 # $vars are jq's, not the shell's.
 items=$(jq -cn \
   --arg reviewer "$reviewer" \
+  --argjson over "$([ "$pr_state" = OPEN ] && echo false || echo true)" \
   --argjson handled "$handled" \
   --argjson reviews "$reviews" \
   --argjson comments "$comments" \
@@ -70,8 +74,10 @@ items=$(jq -cn \
       ($reviews[]
         | select(.user.login == $reviewer and (ours | not))
         # An approval waits for the merge, and an empty review only holds
-        # inline comments, which count on their own.
-        | select(.state == "CHANGES_REQUESTED" or (.state == "COMMENTED" and (.body // "") != ""))
+        # inline comments, which count on their own. Once the pull request
+        # is over, nothing waits, so an approval'"'"'s body counts too.
+        | select(.state == "CHANGES_REQUESTED"
+            or ((.state == "COMMENTED" or ($over and .state == "APPROVED")) and (.body // "") != ""))
         | {id: "review:\(.id)", kind: "review", body: (.body // ""), url: .html_url}),
       ($comments[]
         | select(.user.login == $reviewer and (ours | not))

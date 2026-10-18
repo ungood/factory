@@ -2,6 +2,9 @@
 # Reviews how an implement run went and files up to three issues that would
 # make the next run go better, each labeled `retro` and linking the PR. It
 # runs once the review is over, so it sees each round of review feedback too.
+# It also reads the reviewer's feedback that no round handled, such as a
+# review left with the merge, and files an issue for each idea for follow-up
+# work in it. Those don't count toward the three.
 #
 # Usage: retro <repo> <issue> <worktree> <pull request> <run>
 #
@@ -33,6 +36,7 @@ worktree=$3
 pr=$4
 run=$5
 workplace=$PWD
+bin=$(cd "$(dirname "$0")" && pwd)
 state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
 
 factory_nwo=$(gh repo view "$(git remote get-url origin)" --json nameWithOwner -q .nameWithOwner)
@@ -55,6 +59,12 @@ cp "$state/result.json" "$inputs/result.json"
 for f in "$state"/feedback-*.json "$state"/result-*.json; do
   [ ! -f "$f" ] || cp "$f" "$inputs/"
 done
+# The reviewer's feedback that no round handled: anything left with the
+# merge or after it, or with a close.
+if ! "$bin/review-state" --feedback "$repo" "$issue" "$pr" >"$inputs/unhandled.json"; then
+  log "couldn't read the feedback no round handled"
+  echo '[]' >"$inputs/unhandled.json"
+fi
 gh pr diff "$pr" >"$inputs/pr.diff"
 # Claude keeps a worktree's sessions in a directory named after its path.
 transcripts="$config_dir/projects/${worktree//[^A-Za-z0-9]/-}"
@@ -72,25 +82,31 @@ jq -r '.tasks[] | select(.log != null) | [.name, .log] | @tsv' "$inputs/run.json
     cp "$(dirname "$path")"/* "$inputs/logs/$name/"
   done
 
-schema=$(jq -cn --arg factory "$factory_nwo" --arg repo "$repo_nwo" '{
-  type: "object",
-  properties: {
-    issues: {
-      type: "array",
-      maxItems: 3,
-      items: {
-        type: "object",
-        properties: {
-          repo: {type: "string", enum: ([$factory, $repo] | unique)},
-          title: {type: "string"},
-          body: {type: "string"}
-        },
-        required: ["repo", "title", "body"]
+schema=$(jq -cn --arg factory "$factory_nwo" --arg repo "$repo_nwo" '
+  {
+    repo: {type: "string", enum: ([$factory, $repo] | unique)},
+    title: {type: "string"},
+    body: {type: "string"}
+  } as $issue
+  | {
+    type: "object",
+    properties: {
+      issues: {
+        type: "array",
+        maxItems: 3,
+        items: {type: "object", properties: $issue, required: ["repo", "title", "body"]}
+      },
+      followUps: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: ($issue + {comment: {type: "string"}}),
+          required: ["repo", "title", "body", "comment"]
+        }
       }
-    }
-  },
-  required: ["issues"]
-}')
+    },
+    required: ["issues", "followUps"]
+  }')
 
 prompt=$(
   cat <<EOF
@@ -101,6 +117,7 @@ The run's record is in the current directory:
 - \`issue.md\`: the issue, which is also the end of the agent's task.
 - \`result.json\`: the result file the agent wrote.
 - \`feedback-<n>.json\` and \`result-<n>.json\`, if there are any: round <n>'s review feedback, which the reviewer wrote, and the agent's result for it, with its replies. The first round of feedback is round 2.
+- \`unhandled.json\`: the reviewer's feedback that no round handled, such as a review left with the merge, as a JSON array of items with their \`body\` and \`url\`.
 - \`pr.diff\`: the pull request's diff.
 - \`transcripts/\`: the agent's Claude session transcripts for the worktree, as JSONL. They can be large, so search them rather than reading them whole.
 - \`run.json\`: the marche run's tasks, with their outputs and errors.
@@ -121,6 +138,8 @@ Turn the friction into at most three proposed issues, each a bug to fix or a fea
 File each issue where it belongs: $factory_nwo for the SDLC itself (the workflow, its scripts, and the agent's task), or $repo_nwo for problems in that repo. Before proposing one, check that repo's open issues with \`gh issue list -R <repo> --state open\` and skip anything already covered.
 
 Each issue's body must cite the evidence from this run: quote the transcript, the gate's output or the diff, and say which file it came from. Then say what should change. Write plainly and briefly. Don't link the pull request; that's added for you.
+
+Separately, the reviewer may have left ideas for follow-up work in \`unhandled.json\`. Propose each idea as its own follow-up issue, in \`followUps\` rather than \`issues\`, with the \`url\` of the item it came from as its \`comment\`. Follow-ups don't count toward the three issues, so never drop one to make room. File each where it belongs, the same way, and skip only an idea an open issue already covers. The body should state the reviewer's idea, quoting them, and add what this run shows about it. Feedback in \`unhandled.json\` that isn't an idea for follow-up work, such as a request to change this pull request, is friction to consider for \`issues\` instead.
 EOF
 )
 
@@ -142,7 +161,13 @@ if [ "$(jq -r '.is_error' <<<"$review")" != false ]; then
   exit 1
 fi
 
-proposals=$(jq -c '.structured_output.issues[:3][]' <<<"$review")
+# The retrospective's own issues, then the reviewer's follow-ups, each with
+# the footer that says where it came from.
+proposals=$(jq -c --arg pr "$pr" '
+  ((.structured_output.issues // [])[:3][]
+    | .footer = "Proposed by the retrospective of \($pr).")
+  , ((.structured_output.followUps // [])[]
+    | .footer = "Proposed by the reviewer in \(.comment), and filed by the retrospective of \($pr).")' <<<"$review")
 if [ -z "$proposals" ]; then
   log "the review proposed no issues"
   exit 0
@@ -162,7 +187,7 @@ while read -r proposal; do
   fi
   body=$(jq -r '.body' <<<"$proposal")
   url=$(gh issue create -R "$nwo" --label retro --title "$(jq -r '.title' <<<"$proposal")" \
-    --body "$(printf '%s\n\nProposed by the retrospective of %s.\n' "$body" "$pr")")
+    --body "$(printf '%s\n\n%s\n' "$body" "$(jq -r '.footer' <<<"$proposal")")")
   log "filed $url"
   filed+=("$url")
 done <<<"$proposals"
