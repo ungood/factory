@@ -60,7 +60,7 @@ if [ ! -f "$result" ]; then
     cat >"$state/task.md" <<EOF
 You're working on issue #$issue in $nwo, in this worktree on branch \`$branch\`. The issue follows this section.
 
-Write failing tests first wherever the repo has tests, then implement. Run the repo's checks, which are \`mise run ci\` if the repo defines a \`ci\` task, or else \`mise run lint\` and \`mise run test\` where they exist, and fix what fails. Commit your work with conventional commit messages. Don't push or open a pull request; the workflow does that after running its own checks.
+Write failing tests first wherever the repo has tests, then implement. Run the repo's checks, which are \`mise run ci\` if the repo defines a \`ci\` task, or else \`mise run lint\` and \`mise run test\` where they exist, and fix what fails. Document a change in the doc for the step or feature you changed, such as a doc next to its script or test, rather than in an overview that other changes edit too. In ungood/factory, each SDLC step has its own doc in \`sdlc/docs\`, named after its script. Don't renumber a list to make room for a new item. Commit your work with conventional commit messages. Don't push or open a pull request; the workflow does that after running its own checks.
 
 When you're done, write this JSON to \`$result\`:
 

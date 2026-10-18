@@ -73,6 +73,12 @@ agent() { run --separate-stderr "$root/sdlc/bin/agent" "$tmp/demo" 7 "$tmp/workt
   expect "# The issue" "$(tail -n 1 "$state/task.md")"
 }
 
+@test "the task says to document a change in its own feature's doc" {
+  agent
+  grep -qF "in the doc for the step or feature you changed" "$state/task.md"
+  grep -qF "Don't renumber a list" "$state/task.md"
+}
+
 @test "a retried step with a result reads it again, and types nothing" {
   agent
   rm "$FAKE/sent"
