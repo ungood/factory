@@ -129,15 +129,16 @@ The SDLC starts as the smallest workflow marche can run today and grows as march
 
 ### Version 0
 
-[`sdlc/implement.yaml`](../sdlc/implement.yaml) takes an issue to a draft PR in three steps:
+[`sdlc/implement.yaml`](../sdlc/implement.yaml) takes an issue to a draft PR in four steps:
 
 1. **Agent:** [`sdlc/bin/agent`](../sdlc/bin/agent) creates an Orca worktree named `issue-<n>` and starts Claude in a terminal there, so I can watch it and take over. Claude writes tests, implements, and commits, then writes a result file with its status, a PR title and a summary. The step waits for that file. A retried step reuses the worktree, terminal and result, so a worker crash never starts a second agent.
 2. **Gate:** [`sdlc/bin/gate`](../sdlc/bin/gate) fails on uncommitted changes or a branch with no new commits, then runs the repo's `lint` and `test` tasks where they exist. It doesn't trust the agent's own report.
 3. **Pull request:** [`sdlc/bin/open-pr`](../sdlc/bin/open-pr) pushes the branch and opens a draft PR that closes the issue.
+4. **Retrospective:** [`sdlc/bin/retro`](../sdlc/bin/retro) runs a headless, read-only `claude -p` over the issue, the PR diff, the agent's result file and Claude transcript, and the marche run's logs, including the gate's output. It proposes up to three issues from the friction it finds, each citing evidence from the run, and the script files them in this repo or the one the run worked on, labeled `retro` and linking the PR. The agent checks each repo's open issues first to avoid duplicates. A failed retrospective is logged and never fails the run.
 
-Everything else is still manual: I triage, plan in plan mode, review and merge.
+Everything else is still manual: I triage, including the `retro` issues, plan in plan mode, review and merge.
 
-Orca puts worktrees outside the workplace, where its untracked `mise.local.toml` doesn't apply, so the agent script copies `CLAUDE_CONFIG_DIR` from the source checkout. Without it, the agent would run on the wrong Claude account.
+Orca puts worktrees outside the workplace, where its untracked `mise.local.toml` doesn't apply, so the agent and retrospective scripts copy `CLAUDE_CONFIG_DIR` from the source checkout. Without it, the agent would run on the wrong Claude account.
 
 ### Running it
 
@@ -153,12 +154,11 @@ mise run implement place 12      # take place#12 to a draft PR
 
 Each next step depends on a marche feature:
 
-1. **Retrospective:** the first issue the SDLC works on is its own retrospective step.
-2. **`try` and `switch`:** agentic review with the bounded fix loop.
-3. **`wait`:** PR feedback from my review comments, polling GitHub, then merging, releasing and verifying.
-4. **`run: workflow` and `listen`:** coordination across repos, with child issues.
-5. **Schedules and event triggers:** automatic triage, and routines.
-6. **Pkl:** standard workflows that repos amend.
+1. **`try` and `switch`:** agentic review with the bounded fix loop.
+2. **`wait`:** PR feedback from my review comments, polling GitHub, then merging, releasing and verifying.
+3. **`run: workflow` and `listen`:** coordination across repos, with child issues.
+4. **Schedules and event triggers:** automatic triage, and routines.
+5. **Pkl:** standard workflows that repos amend.
 
 ## Not yet designed
 

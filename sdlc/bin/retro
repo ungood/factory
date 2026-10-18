@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# Reviews how an implement run went and files up to three issues that would
+# make the next run go better, each labeled `retro` and linking the PR.
+#
+# Usage: retro <repo> <issue> <worktree> <pull request> <run>
+#
+# <repo> is the path to the checkout the run worked on, relative to the
+# current directory, which must be the factory workplace. <run> is the marche
+# run's workflow ID. Prints the URLs of the filed issues as a JSON array.
+#
+# The review is a headless, read-only `claude -p`. It proposes the issues,
+# and this script files them, so the agent itself can't change anything. The
+# step never fails the run: any failure is logged, and the script still exits
+# zero with whatever it filed so far.
+set -euo pipefail
+
+filed=()
+inputs=
+log() { echo "retro: $*" >&2; }
+finish() {
+  status=$?
+  [ "$status" -eq 0 ] || log "the retrospective failed with status $status; the pull request stands"
+  [ -z "$inputs" ] || rm -rf "$inputs"
+  if [ "${#filed[@]}" -eq 0 ]; then echo '[]'; else printf '%s\n' "${filed[@]}" | jq -R . | jq -cs .; fi
+  exit 0
+}
+trap finish EXIT
+
+repo=$(git -C "$1" rev-parse --show-toplevel)
+issue=$2
+worktree=$3
+pr=$4
+run=$5
+workplace=$PWD
+state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
+
+factory_nwo=$(gh repo view "$(git remote get-url origin)" --json nameWithOwner -q .nameWithOwner)
+repo_nwo=$(gh repo view "$(git -C "$repo" remote get-url origin)" --json nameWithOwner -q .nameWithOwner)
+
+# The same Claude account the agent ran on, which is also where its
+# transcript is.
+config_dir=$(mise -C "$repo" env --json | jq -r '.CLAUDE_CONFIG_DIR // empty')
+if [ -z "$config_dir" ]; then
+  log "$repo has no CLAUDE_CONFIG_DIR in its mise environment"
+  exit 1
+fi
+
+# Gather the inputs in one directory, so the review only needs to read there,
+# the worktree and the workplace.
+inputs=$(mktemp -d "${TMPDIR:-/tmp}/retro.XXXXXX")
+cp "$state/issue.md" "$inputs/issue.md"
+cp "$state/result.json" "$inputs/result.json"
+gh pr diff "$pr" >"$inputs/pr.diff"
+# Claude keeps a worktree's sessions in a directory named after its path.
+transcripts="$config_dir/projects/${worktree//[^A-Za-z0-9]/-}"
+if [ -d "$transcripts" ]; then
+  cp -R "$transcripts" "$inputs/transcripts"
+else
+  log "no Claude transcripts in $transcripts"
+fi
+marche show --json "$run" >"$inputs/run.json"
+mkdir "$inputs/logs"
+jq -r '.tasks[] | select(.log != null) | [.name, .log] | @tsv' "$inputs/run.json" |
+  while IFS=$'\t' read -r name path; do
+    # Keep every attempt of the step, not only the one marche reports.
+    mkdir -p "$inputs/logs/$name"
+    cp "$(dirname "$path")"/* "$inputs/logs/$name/"
+  done
+
+schema=$(jq -cn --arg factory "$factory_nwo" --arg repo "$repo_nwo" '{
+  type: "object",
+  properties: {
+    issues: {
+      type: "array",
+      maxItems: 3,
+      items: {
+        type: "object",
+        properties: {
+          repo: {type: "string", enum: ([$factory, $repo] | unique)},
+          title: {type: "string"},
+          body: {type: "string"}
+        },
+        required: ["repo", "title", "body"]
+      }
+    }
+  },
+  required: ["issues"]
+}')
+
+prompt=$(
+  cat <<EOF
+You're reviewing how a run of the factory's implement workflow went, so that the next run goes better. The run took issue #$issue in $repo_nwo to the pull request $pr. An agent worked in $worktree, then a gate ran the repo's checks, then the workflow opened the pull request.
+
+The run's record is in the current directory:
+
+- \`issue.md\`: the issue, which is also the end of the agent's task.
+- \`result.json\`: the result file the agent wrote.
+- \`pr.diff\`: the pull request's diff.
+- \`transcripts/\`: the agent's Claude session transcripts for the worktree, as JSONL. They can be large, so search them rather than reading them whole.
+- \`run.json\`: the marche run's tasks, with their outputs and errors.
+- \`logs/<step>/\`: each step's standard output and error, one pair of files per attempt. \`logs/gate/\` is the gate's output, and \`logs/agent/\` includes the task the agent was given.
+
+The workflow's own definition and scripts are in the factory workplace, $workplace, under \`sdlc/\`. The repo the run worked on is checked out at $worktree.
+
+Look for friction in the run:
+
+- what the agent got wrong, retried or went around in circles on
+- what the gate caught
+- where the task, the issue or the scripts were unclear
+- what a person had to fix by hand, which shows in the transcript as a person typing into the session
+
+Turn the friction into at most three proposed issues, each a bug to fix or a feature to add, that would have prevented it. Propose only what the evidence supports, and propose none if the run went smoothly. A bad or duplicate issue costs more than a missing one.
+
+File each issue where it belongs: $factory_nwo for the SDLC itself (the workflow, its scripts, and the agent's task), or $repo_nwo for problems in that repo. Before proposing one, check that repo's open issues with \`gh issue list -R <repo> --state open\` and skip anything already covered.
+
+Each issue's body must cite the evidence from this run: quote the transcript, the gate's output or the diff, and say which file it came from. Then say what should change. Write plainly and briefly. Don't link the pull request; that's added for you.
+EOF
+)
+
+# Only the tools named here, and no settings, hooks or MCP servers from the
+# account, keep the review read-only.
+log "reviewing the run"
+review=$(cd "$inputs" && CLAUDE_CONFIG_DIR="$config_dir" claude -p "$prompt" \
+  --add-dir "$worktree" "$workplace" \
+  --setting-sources project \
+  --strict-mcp-config \
+  --tools Read Grep Glob Bash \
+  --allowedTools "Bash(gh issue list:*)" "Bash(gh issue view:*)" "Bash(gh search issues:*)" \
+  --permission-mode dontAsk \
+  --no-session-persistence \
+  --output-format json \
+  --json-schema "$schema")
+if [ "$(jq -r '.is_error' <<<"$review")" != false ]; then
+  log "the review failed: $(jq -r '.result // .subtype' <<<"$review")"
+  exit 1
+fi
+
+proposals=$(jq -c '.structured_output.issues[:3][]' <<<"$review")
+if [ -z "$proposals" ]; then
+  log "the review proposed no issues"
+  exit 0
+fi
+
+labeled=()
+while read -r proposal; do
+  nwo=$(jq -r '.repo' <<<"$proposal")
+  if [ "$nwo" != "$factory_nwo" ] && [ "$nwo" != "$repo_nwo" ]; then
+    log "skipping an issue for $nwo, which the run didn't touch"
+    continue
+  fi
+  if [[ " ${labeled[*]-} " != *" $nwo "* ]]; then
+    gh label create retro -R "$nwo" --force --color c5def5 \
+      --description "Proposed by an SDLC retrospective" >/dev/null
+    labeled+=("$nwo")
+  fi
+  body=$(jq -r '.body' <<<"$proposal")
+  url=$(gh issue create -R "$nwo" --label retro --title "$(jq -r '.title' <<<"$proposal")" \
+    --body "$(printf '%s\n\nProposed by the retrospective of %s.\n' "$body" "$pr")")
+  log "filed $url"
+  filed+=("$url")
+done <<<"$proposals"
