@@ -1,0 +1,4 @@
+# The tests get $root, $tmp and the like from init in helpers.bash, which
+# they load with bats's load. ShellCheck can't follow load, so it would
+# report every one of them as unassigned.
+disable=SC2154

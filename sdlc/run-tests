@@ -6,8 +6,8 @@
 #
 # Usage: sdlc/run-tests [<test>...]
 #
-# Each <test> is a path relative to the repo, such as sdlc/test/gate. With
-# none, runs every test in sdlc/test.
+# Each <test> is a bats file relative to the repo, such as
+# sdlc/test/gate.bats. With none, runs every test in sdlc/test.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -21,10 +21,4 @@ fi
 git -C "$root" worktree add --quiet --detach "$export" HEAD
 
 cd "$export"
-[ $# -gt 0 ] || set -- sdlc/test/*
-failures=0
-for t in "$@"; do
-  echo "# $t"
-  "./$t" || failures=$((failures + 1))
-done
-[ "$failures" -eq 0 ] || { echo "run-tests: $failures of $# tests failed" >&2; exit 1; }
+bats "${@:-sdlc/test}"
