@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+        with:
+          # The repos in place.toml aren't cloned here, so no config root
+          # matches and `mise install --monorepo` fails.
+          monorepo: false
+      - run: mise run lint
+      - run: mise run test
