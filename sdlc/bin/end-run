@@ -41,7 +41,7 @@ case "$ending" in
     title=$(field title)
     instance=$(field instance)
     # One line, cut short, since it's typed into the terminal.
-    detail=$(field detail "$@" | tr -s '[:space:]' ' ' | sed -E 's/^ //; s/ $//')
+    detail=$(field detail | tr -s '[:space:]' ' ' | sed -E 's/^ //; s/ $//')
     [ "${#detail}" -le 300 ] || detail="${detail:0:300}…"
     # The task the error came from, under the workflow's outermost try: in
     # /do/1/implement/try/7/reviewState/try/0/check, that's reviewState.
