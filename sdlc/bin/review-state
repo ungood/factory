@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Reports where an implement run's pull request stands with its reviewer, the
+# person whose GitHub account the workflow runs as.
+#
+# Usage: review-state [--feedback] <repo> <issue> <pull request>
+#
+# <repo> is the path to the checkout the run worked on, relative to the
+# current directory. <pull request> is the pull request's URL. Prints one of:
+#
+# - pending: nothing new from the reviewer since the last round
+# - changes: new review comments, or a review that requests changes
+# - approved: the reviewer approved, with nothing new to address
+# - closed: the pull request was merged or closed
+#
+# The author of a pull request can't approve it on GitHub, and the workflow
+# opens pull requests as the reviewer. So besides an approving review, a
+# review or comment whose first line is `/approve` counts as approval.
+#
+# With --feedback, prints the new feedback instead, as a JSON array of
+# {"id", "kind", "body", "url"}, where an inline comment adds "path", "line"
+# and "thread", the comment to reply to. Feedback a round has handled is
+# listed by ID in the run's state directory, in `handled`. The workflow's own
+# replies carry a marker, so they're never mistaken for feedback.
+set -euo pipefail
+
+mode=state
+if [ "${1-}" = --feedback ]; then
+  mode=feedback
+  shift
+fi
+repo=$(git -C "$1" rev-parse --show-toplevel)
+issue=$2
+# The previous step's output may end in a newline.
+url=$(tr -d "[:space:]" <<<"$3")
+state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
+
+if ! [[ "$url" =~ ^https://github\.com/([^/]+/[^/]+)/pull/([0-9]+)$ ]]; then
+  echo "review-state: $url isn't a pull request URL" >&2
+  exit 1
+fi
+nwo=${BASH_REMATCH[1]}
+number=${BASH_REMATCH[2]}
+
+pr_state=$(gh pr view "$url" --json state -q .state)
+if [ "$mode" = state ] && [ "$pr_state" != OPEN ]; then
+  echo closed
+  exit 0
+fi
+
+reviewer=$(gh api user -q .login)
+handled=$(if [ -f "$state/handled" ]; then jq -R . "$state/handled" | jq -cs .; else echo '[]'; fi)
+# --paginate prints one array per page, so slurp the pages into one.
+fetch() { gh api --paginate "$1" | jq -cs 'add // []'; }
+reviews=$(fetch "repos/$nwo/pulls/$number/reviews")
+comments=$(fetch "repos/$nwo/pulls/$number/comments")
+conversation=$(fetch "repos/$nwo/issues/$number/comments")
+
+# shellcheck disable=SC2016 # $vars are jq's, not the shell's.
+items=$(jq -cn \
+  --arg reviewer "$reviewer" \
+  --argjson handled "$handled" \
+  --argjson reviews "$reviews" \
+  --argjson comments "$comments" \
+  --argjson conversation "$conversation" '
+  def approves: ((. // "") + "\n") | split("\n")[0] | gsub("^\\s+|\\s+$"; "") == "/approve";
+  def ours: (.body // "") | contains("<!-- factory:reply -->");
+  # A pending review is the reviewer'"'"'s unsent draft, which GitHub shows
+  # only to its author: the account the workflow runs as.
+  ([$reviews[] | select(.state == "PENDING") | .id]) as $drafts
+  | [
+      ($reviews[]
+        | select(.user.login == $reviewer and .state != "PENDING" and (ours | not))
+        | {id: "review:\(.id)", kind: "review", body: (.body // ""), url: .html_url,
+           approval: (.state == "APPROVED" or (.body | approves)),
+           feedback: (.state == "CHANGES_REQUESTED" or ((.body // "") != "" and (.body | approves | not) and .state != "APPROVED"))}),
+      ($comments[]
+        | select(.user.login == $reviewer and (ours | not))
+        | select(.pull_request_review_id as $r | $drafts | index($r) | not)
+        | {id: "comment:\(.id)", kind: "inline", body, url: .html_url,
+           path, line: (.line // .original_line), thread: (.in_reply_to_id // .id),
+           approval: false, feedback: true}),
+      ($conversation[]
+        | select(.user.login == $reviewer and (ours | not))
+        | {id: "conversation:\(.id)", kind: "conversation", body, url: .html_url,
+           approval: (.body | approves), feedback: (.body | approves | not)})
+    ]
+  | map(select(.id as $id | $handled | index($id) | not))')
+
+if [ "$mode" = feedback ]; then
+  jq -c 'map(select(.feedback or .approval) | del(.feedback, .approval))' <<<"$items"
+elif jq -e 'any(.[]; .feedback)' <<<"$items" >/dev/null; then
+  echo changes
+elif jq -e 'any(.[]; .approval)' <<<"$items" >/dev/null; then
+  echo approved
+else
+  echo pending
+fi

@@ -3,7 +3,7 @@ document:
   namespace: factory
   name: implement
   version: '0.1.0'
-  summary: Take a GitHub issue to a draft pull request that passes the repo's checks.
+  summary: Take a GitHub issue through a pull request and its review to a merge.
 do:
   # Input: {"repo": "<path to a checkout>", "issue": <number>}
   - remember:
@@ -50,6 +50,104 @@ do:
             - ${ $context.issue }
             - ${ $context.worktree }
             - ${ $context.pullRequest }
+  # The review loop. The agent's first pass was round 1, and each round of
+  # the reviewer's feedback is the next. The run waits up to 7 days for each
+  # review.
+  - startReview:
+      set:
+        round: 1
+      export:
+        as: '$context + .'
+  - awaitReview:
+      set:
+        reviewBy: ${ $task.startedAt.epoch.seconds + 7 * 24 * 60 * 60 }
+      export:
+        as: '$context + .'
+  - poll:
+      wait:
+        minutes: 5
+  # Rides out a few minutes without GitHub, such as a laptop waking up.
+  - reviewState:
+      try:
+        - check:
+            run:
+              shell:
+                command: sdlc/bin/review-state "$1" "$2" "$3"
+                arguments:
+                  - ${ $context.repo }
+                  - ${ $context.issue }
+                  - ${ $context.pullRequest }
+      catch:
+        errors:
+          with:
+            type: https://open-workflow-specification.org/spec/1.0.0/errors/runtime
+        retry:
+          delay:
+            minutes: 1
+          limit:
+            duration:
+              hours: 1
+  - decide:
+      switch:
+        - closed:
+            when: . == "closed"
+            then: retro
+        - approved:
+            when: . == "approved"
+            then: merge
+        - changes:
+            when: . == "changes"
+            then: revise
+        - expired:
+            when: $task.startedAt.epoch.seconds >= $context.reviewBy
+            then: expire
+        - pending:
+            then: poll
+  - revise:
+      run:
+        shell:
+          command: sdlc/bin/revise "$1" "$2" "$3" "$4" "$5"
+          arguments:
+            - ${ $context.repo }
+            - ${ $context.issue }
+            - ${ $context.worktree }
+            - ${ $context.pullRequest }
+            - ${ $context.round + 1 | tostring }
+  - regate:
+      run:
+        shell:
+          command: sdlc/bin/gate "$1"
+          arguments:
+            - ${ $context.worktree }
+  - reply:
+      run:
+        shell:
+          command: sdlc/bin/reply "$1" "$2" "$3" "$4" "$5"
+          arguments:
+            - ${ $context.repo }
+            - ${ $context.issue }
+            - ${ $context.worktree }
+            - ${ $context.pullRequest }
+            - ${ $context.round + 1 | tostring }
+  - nextRound:
+      set:
+        round: ${ $context.round + 1 }
+      export:
+        as: '$context + .'
+      then: awaitReview
+  - expire:
+      set:
+        expired: true
+      export:
+        as: '$context + .'
+      then: retro
+  - merge:
+      run:
+        shell:
+          command: sdlc/bin/merge "$1" "$2"
+          arguments:
+            - ${ $context.worktree }
+            - ${ $context.pullRequest }
   # Never fails: a failed retrospective is logged, and the pull request stands.
   - retro:
       run:
@@ -61,5 +159,31 @@ do:
             - ${ $context.worktree }
             - ${ $context.pullRequest }
             - ${ $workflow.id }
+      export:
+        as: '$context + { retro: fromjson }'
+  - finish:
+      switch:
+        - expired:
+            when: $context.expired == true
+            then: giveUp
+        - done:
+            then: cleanup
+  # Never fails: anything it can't remove is logged and left in place.
+  - cleanup:
+      run:
+        shell:
+          command: sdlc/bin/cleanup "$1" "$2" "$3"
+          arguments:
+            - ${ $context.repo }
+            - ${ $context.worktree }
+            - ${ $context.branch }
       output:
-        as: '{ pullRequest: $context.pullRequest, branch: $context.branch, worktree: $context.worktree, retro: fromjson }'
+        as: '{ pullRequest: $context.pullRequest, branch: $context.branch, rounds: $context.round, retro: $context.retro }'
+      then: end
+  - giveUp:
+      raise:
+        error:
+          type: https://github.com/ungood/factory/errors/review-timed-out
+          status: 408
+          title: No review within 7 days
+          detail: ${ "Nobody reviewed \($context.pullRequest) within 7 days, so the run ended without merging it. The pull request and its worktree are still there." }

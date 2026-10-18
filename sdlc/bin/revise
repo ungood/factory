@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# Sends the reviewer's new feedback on an implement run's pull request into
+# the agent's own terminal, so the session keeps its context, and waits for
+# that round's result file.
+#
+# Usage: revise <repo> <issue> <worktree> <pull request> <round>
+#
+# <repo> is the path to the checkout the run worked on, relative to the
+# current directory. <round> counts the agent's passes: the first was round
+# 1, so the first round of feedback is round 2. The round's feedback goes to
+# feedback-<round>.json in the run's state directory, and the agent writes
+# result-<round>.json there, with the replies the workflow posts for it.
+# Prints the result as JSON. Exits non-zero when the agent reports it's
+# blocked, or when the agent's terminal no longer runs Claude: this script
+# never starts a new agent.
+#
+# A retried step reuses the round's feedback and doesn't send it twice.
+set -euo pipefail
+
+repo=$(git -C "$1" rev-parse --show-toplevel)
+issue=$2
+worktree=$3
+url=$(tr -d "[:space:]" <<<"$4")
+round=$5
+bin=$(cd "$(dirname "$0")" && pwd)
+state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
+feedback="$state/feedback-$round.json"
+task="$state/review-$round.md"
+result="$state/result-$round.json"
+
+log() { echo "revise: $*" >&2; }
+
+if [ ! -f "$result" ]; then
+  if [ ! -f "$feedback" ]; then
+    "$bin/review-state" --feedback "$1" "$issue" "$url" >"$feedback.tmp"
+    mv "$feedback.tmp" "$feedback"
+  fi
+
+  if [ ! -f "$state/terminal" ]; then
+    log "there's no $state/terminal, so there's no agent to send the feedback to"
+    exit 1
+  fi
+  terminal=$(cat "$state/terminal")
+  identity=$(orca terminal list --worktree "path:$worktree" --json |
+    jq -r --arg t "$terminal" '.result.terminals[] | select(.handle == $t) | .agentIdentity // "a shell"')
+  if [ -z "$identity" ]; then
+    log "the agent's terminal $terminal has closed, so nobody can address the feedback in $feedback." \
+      "Starting a fresh agent isn't supported yet."
+    exit 1
+  fi
+  if [ "$identity" != claude ]; then
+    log "the agent's terminal $terminal runs $identity, not Claude, so nobody can address the feedback in $feedback." \
+      "Starting a fresh agent isn't supported yet."
+    exit 1
+  fi
+
+  if [ ! -f "$state/sent-$round" ]; then
+    cat >"$task" <<EOF
+The reviewer left feedback on $url, the pull request for this work. It's in \`$feedback\`, as a JSON array. Each item has an \`id\`, its \`kind\` (\`inline\` for a comment on a line of the diff, \`review\` for a review's summary, \`conversation\` for a comment on the pull request), the \`body\` and its \`url\`. An inline comment also has its \`path\` and \`line\`. An item whose body starts with \`/approve\` is an approval that came with other feedback; it needs no reply, and the reviewer will approve again once they've seen your changes.
+
+Address each item: make the change, or decide that you disagree. Run \`mise run lint\` and \`mise run test\` if those tasks exist, and fix what fails. Commit your work with conventional commit messages. Don't push, and don't reply on GitHub yourself; the workflow pushes, then posts your replies.
+
+When you're done, write this JSON to \`$result\`:
+
+    {"status": "done", "summary": "<what changed in this round>", "replies": [{"id": "<the item's id>", "body": "<Markdown reply>"}]}
+
+Reply to each item with what you did, or why you disagree. If you're blocked and need a person, write {"status": "blocked", "summary": "<what's blocking you>"} instead.
+EOF
+    # Wait for Claude's prompt, so the message isn't typed into a busy
+    # session. After ten minutes, send it anyway, and Claude queues it.
+    orca terminal wait --terminal "$terminal" --for tui-idle --timeout-ms 600000 --json >/dev/null 2>&1 || true
+    log "sending round $round's feedback to $terminal"
+    orca terminal send --terminal "$terminal" \
+      --text "Read $task and do what it says." --enter --wait-submit 30 --json >/dev/null
+    touch "$state/sent-$round"
+    orca worktree set --worktree "path:$worktree" --comment "addressing review feedback, round $round" \
+      --workspace-status in-progress --json >/dev/null || log "couldn't update the worktree $worktree in Orca"
+  fi
+
+  log "waiting for $result"
+  while [ ! -f "$result" ]; do
+    sleep 10
+    if [ ! -f "$result" ] && ! orca terminal list --worktree "path:$worktree" --json |
+      jq -e --arg t "$terminal" 'any(.result.terminals[]; .handle == $t)' >/dev/null; then
+      log "the agent's terminal closed without writing $result"
+      exit 1
+    fi
+  done
+fi
+
+# The round handled everything it was sent, including any approval that came
+# with feedback, which the reviewer gives again after seeing the changes.
+jq -r '.[].id' "$feedback" >>"$state/handled"
+
+jq -c . "$result"
+status=$(jq -r '.status' "$result")
+if [ "$status" != "done" ]; then
+  log "the agent reported $status: $(jq -r '.summary' "$result")"
+  exit 1
+fi
