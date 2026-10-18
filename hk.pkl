@@ -1,0 +1,38 @@
+// Early feedback only. CI runs `mise run lint` and `mise run test` itself and
+// never depends on these hooks.
+amends "package://github.com/jdx/hk/releases/download/v2.7.0/hk@2.7.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v2.7.0/hk@2.7.0#/Builtins.pkl"
+
+// The same checks as `mise run lint`, on the files being committed.
+local linters = new Mapping<String, Step> {
+  ["rumdl"] = Builtins.rumdl
+  ["shellcheck"] = (Builtins.shellcheck) {
+    // The SDLC's scripts have no extension, and bats files aren't bash by
+    // type, so name the files `mise run lint` checks.
+    match_any = List(new FileSelector {
+      glob = List("sdlc/run-tests", "sdlc/bin/*", "sdlc/test/*.bats", "sdlc/test/*.bash")
+    })
+  }
+  ["actionlint"] = Builtins.actionlint
+  ["marche"] {
+    glob = "sdlc/*.yaml"
+    check = "for f in {{files}}; do marche validate \"$f\" || exit 1; done"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    stash = "git"
+    steps = linters
+  }
+  ["pre-push"] {
+    steps {
+      ["test"] {
+        check = "mise run test"
+      }
+    }
+  }
+  ["check"] {
+    steps = linters
+  }
+}
