@@ -12,13 +12,27 @@ do:
         issue: ${ .issue | tostring }
       export:
         as: '.'
-  - agent:
+  # Creates the worktree and installs the repo's tools and dependencies, so
+  # the agent starts in a ready worktree.
+  - prepare:
       run:
         shell:
-          command: sdlc/bin/agent "$1" "$2"
+          command: sdlc/bin/prepare "$1" "$2"
           arguments:
             - ${ $context.repo }
             - ${ $context.issue }
+      output:
+        as: ${ fromjson }
+      export:
+        as: '$context + .'
+  - agent:
+      run:
+        shell:
+          command: sdlc/bin/agent "$1" "$2" "$3"
+          arguments:
+            - ${ $context.repo }
+            - ${ $context.issue }
+            - ${ $context.worktree }
       output:
         as: ${ fromjson }
       export:

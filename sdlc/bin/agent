@@ -2,20 +2,21 @@
 # Runs Claude on a GitHub issue in an Orca terminal, where a person can watch
 # it and take over, and waits until the agent writes its result file.
 #
-# Usage: agent <repo> <issue>
+# Usage: agent <repo> <issue> <worktree>
 #
-# <repo> is a path to a checkout, relative to the current directory. Prints
-# the result as JSON: {"worktree", "branch", "status", "title", "summary"}.
-# Exits non-zero when the agent reports it's blocked or the terminal exits
-# without a result.
+# <repo> is a path to a checkout, relative to the current directory, and
+# <worktree> is the Orca worktree prepare made for the issue. Prints the
+# result as JSON: {"status", "title", "summary"}. Exits non-zero when the
+# agent reports it's blocked or the terminal exits without a result.
 #
-# A retried step finds the worktree, terminal and result from the first
-# attempt and picks up where it left off, so a worker crash never starts a
-# second agent on the same issue.
+# A retried step finds the terminal and result from the first attempt and
+# picks up where it left off, so a worker crash never starts a second agent
+# on the same issue.
 set -euo pipefail
 
 repo=$(git -C "$1" rev-parse --show-toplevel)
 issue=$2
+path=$3
 name="issue-$issue"
 state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
 result="$state/result.json"
@@ -23,33 +24,10 @@ mkdir -p "$state"
 
 log() { echo "agent: $*" >&2; }
 
-repo_id=$(orca repo list --json |
-  jq -r --arg path "$repo" '.result.repos[] | select(.path == $path) | .id')
-if [ -z "$repo_id" ]; then
-  log "Orca doesn't know $repo. Add it with: orca repo add --path $repo"
-  exit 1
-fi
-
-# Read the issue first, so a wrong number fails before anything is created.
 nwo=$(gh repo view "$(git -C "$repo" remote get-url origin)" --json nameWithOwner -q .nameWithOwner)
-if [ ! -f "$result" ]; then
-  gh issue view "$issue" -R "$nwo" --json title,body \
-    --template '# {{.title}}{{"\n\n"}}{{.body}}{{"\n"}}' >"$state/issue.md"
-fi
+branch=$(git -C "$path" branch --show-current)
 
-# Orca names the branch <git user>/<name> and the directory <name>.
-worktree=$(orca worktree list --repo "id:$repo_id" --json |
-  jq -c --arg name "$name" '[.result.worktrees[] | select(.path | endswith("/" + $name))][0] // empty')
-if [ -z "$worktree" ]; then
-  log "creating worktree $name"
-  worktree=$(orca worktree create --repo "id:$repo_id" --name "$name" --issue "$issue" \
-    --no-parent --setup skip --json | jq -c '.result.worktree')
-fi
-worktree_id=$(jq -r '.id' <<<"$worktree")
-path=$(jq -r '.path' <<<"$worktree")
-branch=$(jq -r '.branch | sub("^refs/heads/"; "")' <<<"$worktree")
-
-terminals() { orca terminal list --worktree "id:$worktree_id" --json | jq -c '.result.terminals'; }
+terminals() { orca terminal list --worktree "path:$path" --json | jq -c '.result.terminals'; }
 has_terminal() { terminals | jq -e --arg t "$1" 'any(.[]; .handle == $t)' >/dev/null; }
 
 # orca terminal wait exits non-zero when it times out, so read satisfied
@@ -81,7 +59,7 @@ if [ ! -f "$result" ]; then
     cat >"$state/task.md" <<EOF
 You're working on issue #$issue in $nwo, in this worktree on branch \`$branch\`. The issue follows this section.
 
-Write failing tests first wherever the repo has tests, then implement. Run \`mise run lint\` and \`mise run test\` if those tasks exist, and fix what fails. Commit your work with conventional commit messages. Don't push or open a pull request; the workflow does that after running its own checks.
+Write failing tests first wherever the repo has tests, then implement. Run the repo's checks, which are \`mise run ci\` if the repo defines a \`ci\` task, or else \`mise run lint\` and \`mise run test\` where they exist, and fix what fails. Commit your work with conventional commit messages. Don't push or open a pull request; the workflow does that after running its own checks.
 
 When you're done, write this JSON to \`$result\`:
 
@@ -95,7 +73,7 @@ EOF
     log "starting Claude in $path"
     terminal=$(terminals | jq -r '.[0].handle // empty')
     if [ -z "$terminal" ]; then
-      terminal=$(orca terminal create --worktree "id:$worktree_id" --title "$name" --json |
+      terminal=$(orca terminal create --worktree "path:$path" --title "$name" --json |
         jq -r '.result.terminal.handle')
     fi
     echo "$terminal" >"$state/terminal"
@@ -114,7 +92,7 @@ EOF
     fi
     orca terminal send --terminal "$terminal" \
       --text "Read $state/task.md and do what it says." --enter --wait-submit 30 --json >/dev/null
-    orca worktree set --worktree "id:$worktree_id" --comment "implementing #$issue" \
+    orca worktree set --worktree "path:$path" --comment "implementing #$issue" \
       --workspace-status in-progress --json >/dev/null || true
   fi
 
@@ -130,8 +108,7 @@ EOF
   done
 fi
 
-jq -c --arg worktree "$path" --arg branch "$branch" \
-  '{worktree: $worktree, branch: $branch} + .' "$result"
+jq -c . "$result"
 status=$(jq -r '.status' "$result")
 if [ "$status" != "done" ]; then
   log "the agent reported $status: $(jq -r '.summary' "$result")"
