@@ -19,6 +19,7 @@ shellcheck = "0.11.0"
 bats = "1.14.0"
 hk = { version = "2.7.0", workflow = "release.yml" }
 actionlint = "1.7.12"
+jq = "1.8.2"
 
 [tasks.sync]
 description = "Clone and update the repos listed in place.toml"
