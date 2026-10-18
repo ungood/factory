@@ -159,7 +159,7 @@ A repo opts in to the SDLC through its mise tasks:
 - **`install`:** optional. Whatever a fresh checkout needs beyond `mise install`, such as `node_modules` or generated code. Prepare runs it.
 - **`ci`:** the repo's checks. The gate runs `ci` if the repo defines it, or else `lint` and `test`, each where it exists.
 
-This repo defines `lint` and `test`. [isthmia](https://github.com/cyc-seattle/isthmia) defines `install` and `ci`.
+This repo defines `lint` and `test`. Its `test` task, [`sdlc/run-tests`](../sdlc/run-tests), runs the tests in `sdlc/test` against a clean export of `HEAD`, so file modes and missing files look the way a run sees them, and a `chmod` that was never committed doesn't count. The tests run every script by path, as the workflow does, never through `bash` or `sh`. [`sdlc/test/workflow`](../sdlc/test/workflow) enforces both, and fails unless every script a workflow in `sdlc/*.yaml` runs is committed with mode `100755` and run by path in at least one test. [isthmia](https://github.com/cyc-seattle/isthmia) defines `install` and `ci`.
 
 ### Running it
 

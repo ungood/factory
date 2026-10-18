@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Checks that the tests use the SDLC's scripts the way a run does: every
+# script a workflow in sdlc/*.yaml runs is committed with mode 100755 and run
+# by path in at least one test, and no test runs a script through bash or sh,
+# which would hide a missing executable bit.
+#
+# Reads the modes from HEAD, not the working tree, since the commit is what a
+# run gets.
+#
+# Usage: sdlc/test/workflow
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/../.." && pwd)
+cd "$root"
+
+failures=0
+fail() {
+  echo "FAIL: $*"
+  failures=$((failures + 1))
+}
+
+# Lines in the tests, other than comments, that hand a file to a shell
+# instead of running it: a shell, source or . followed by a variable, a path
+# or a .sh file. bash -c and the like run a string, which is fine.
+file='[[:space:]]+["'\'']?(\$|~|\.{0,2}/|[[:alnum:]_.-]+/|[[:alnum:]_.-]+\.(sh|bash)([[:space:]"'\'']|$))'
+shell="((^|[^[:alnum:]_./-])(bash|sh|dash|zsh|source)|(^|[;&|({])[[:space:]]*\.)$file"
+while IFS= read -r hit; do
+  fail "a test runs a script through a shell instead of by path: $hit"
+done < <(grep -nE "$shell" sdlc/test/* | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true)
+[ "$failures" -eq 0 ] && echo "ok: the tests run scripts by path"
+
+# The first word of each command a workflow runs, where it's a path.
+scripts=$(sed -nE 's/^[[:space:]]*command:[[:space:]]*["'\'']?([^[:space:]"'\'']+).*/\1/p' sdlc/*.yaml |
+  grep / | sort -u)
+if [ -z "$scripts" ]; then
+  fail "found no scripts in the commands in sdlc/*.yaml"
+fi
+# grep -q would stop reading early, so keep the tests' code in a variable
+# rather than piping it.
+tests=$(grep -vhE '^[[:space:]]*#' sdlc/test/*)
+for script in $scripts; do
+  mode=$(git ls-tree HEAD -- "$script" | awk '{print $1}')
+  case "$mode" in
+    100755) ;;
+    "") fail "$script, which a workflow runs, isn't committed" ;;
+    *) fail "$script, which a workflow runs, is committed with mode $mode, not 100755" ;;
+  esac
+  if ! grep -qE "/$script([\"'[:space:]]|$)" <<<"$tests"; then
+    fail "$script, which a workflow runs, isn't run by path in any test in sdlc/test"
+  fi
+done
+[ "$failures" -eq 0 ] && echo "ok: every script a workflow runs is executable and tested"
+
+[ "$failures" -eq 0 ] || { echo "$failures failed"; exit 1; }

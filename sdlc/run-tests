@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Runs the SDLC's tests against a clean export of HEAD, so file modes and
+# missing files look the way a run sees them. A chmod or a new file that
+# isn't committed doesn't count. The gate fails on uncommitted changes, so
+# what's committed is everything a run gets.
+#
+# Usage: sdlc/run-tests [<test>...]
+#
+# Each <test> is a path relative to the repo, such as sdlc/test/gate. With
+# none, runs every test in sdlc/test.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX")
+export="$tmp/export"
+trap 'git -C "$root" worktree remove --force "$export" 2>/dev/null || true; rm -rf "$tmp"' EXIT
+
+if [ -n "$(git -C "$root" status --porcelain)" ]; then
+  echo "run-tests: testing HEAD, $(git -C "$root" rev-parse --short HEAD). Uncommitted changes aren't tested." >&2
+fi
+git -C "$root" worktree add --quiet --detach "$export" HEAD
+
+cd "$export"
+[ $# -gt 0 ] || set -- sdlc/test/*
+failures=0
+for t in "$@"; do
+  echo "# $t"
+  "./$t" || failures=$((failures + 1))
+done
+[ "$failures" -eq 0 ] || { echo "run-tests: $failures of $# tests failed" >&2; exit 1; }
