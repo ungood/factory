@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Tests sdlc/bin/show-review against a fake orca that records the comment and
+# status it's asked to set, and one that always fails.
+#
+# Usage: sdlc/test/show-review
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/../.." && pwd)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/show-review-test.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+
+mkdir -p "$tmp/bin"
+# Records "<worktree>|<status>|<comment>|<unread>" for each worktree set.
+cat >"$tmp/bin/orca" <<'ORCA'
+#!/usr/bin/env bash
+[ "$1 $2" = "worktree set" ] || { echo "fake orca: unexpected call: $*" >&2; exit 1; }
+[ -n "${FAKE_ORCA_FAIL-}" ] && exit 1
+shift 2
+worktree= status= comment= unread=no
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --worktree) worktree=$2; shift ;;
+    --workspace-status) status=$2; shift ;;
+    --comment) comment=$2; shift ;;
+    --unread) unread=yes ;;
+  esac
+  shift
+done
+echo "$worktree|$status|$comment|$unread" >"$FAKE_ORCA"
+ORCA
+chmod +x "$tmp/bin/orca"
+
+export PATH="$tmp/bin:$PATH" FAKE_ORCA="$tmp/set"
+
+failures=0
+# Runs show-review and checks the line the fake orca recorded against a
+# pattern.
+expect() {
+  local name=$1 want=$2 got
+  shift 2
+  rm -f "$FAKE_ORCA"
+  if ! "$root/sdlc/bin/show-review" "$@" 2>/dev/null; then
+    echo "FAIL: $name: show-review exited non-zero"
+    failures=$((failures + 1))
+    return
+  fi
+  got=$(cat "$FAKE_ORCA" 2>/dev/null || echo nothing)
+  if [[ "$got" =~ ^$want$ ]]; then
+    echo "ok: $name"
+  else
+    echo "FAIL: $name: want $want, got $got"
+    failures=$((failures + 1))
+  fi
+}
+
+expect "pending says when the next check is" \
+  "path:/w\|in-review\|Waiting for review, next check [0-2][0-9]:[0-5][0-9]\|no" \
+  /w pending 2 5
+expect "a trailing newline on the state doesn't matter" \
+  "path:/w\|in-review\|Waiting for review, next check [0-2][0-9]:[0-5][0-9]\|no" \
+  /w $'pending\n' 2 5
+expect "changes says the round is starting" \
+  "path:/w\|in-progress\|Round 3: sending the new feedback to the agent\|no" \
+  /w changes 3 5
+expect "merged says the retrospective is running" \
+  "path:/w\|in-review\|PR merged, running the retrospective\|no" \
+  /w merged 2 5
+expect "closed says the worktree stays" \
+  "path:/w\|in-review\|PR closed without merging, so the worktree stays\|no" \
+  /w closed 2 5
+
+# The next check is the given number of minutes from now.
+rm -f "$FAKE_ORCA"
+"$root/sdlc/bin/show-review" /w pending 2 0 2>/dev/null
+before=$(date +%H:%M)
+got=$(cut -d'|' -f3 "$FAKE_ORCA")
+after=$(date +%H:%M)
+if [ "$got" = "Waiting for review, next check $before" ] || [ "$got" = "Waiting for review, next check $after" ]; then
+  echo "ok: the next check time counts from now"
+else
+  echo "FAIL: the next check time counts from now: got $got, around $before"
+  failures=$((failures + 1))
+fi
+
+if FAKE_ORCA_FAIL=1 "$root/sdlc/bin/show-review" /w pending 2 5 2>/dev/null; then
+  echo "ok: an Orca failure doesn't fail the step"
+else
+  echo "FAIL: an Orca failure doesn't fail the step"
+  failures=$((failures + 1))
+fi
+
+if "$root/sdlc/bin/show-review" /w surprise 2 5 2>/dev/null; then
+  echo "ok: an unknown state doesn't fail the step"
+else
+  echo "FAIL: an unknown state doesn't fail the step"
+  failures=$((failures + 1))
+fi
+
+[ "$failures" -eq 0 ] || { echo "$failures failed"; exit 1; }

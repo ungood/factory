@@ -78,10 +78,8 @@ do:
         reviewBy: ${ $task.startedAt.epoch.seconds + 7 * 24 * 60 * 60 }
       export:
         as: '$context + .'
-  - poll:
-      wait:
-        minutes: 5
-  # Rides out a few minutes without GitHub, such as a laptop waking up.
+  # Checks right away, so a restarted run, or one back from a round, sees
+  # feedback that's already there. Rides out a few minutes without GitHub, such as a laptop waking up.
   - reviewState:
       try:
         - check:
@@ -104,19 +102,34 @@ do:
               hours: 1
       export:
         as: '$context + { review: . }'
+  # Never fails: if Orca can't be updated, that's logged, and the run goes on.
+  # The last argument is poll's wait in minutes, for the next check's time.
+  - showReview:
+      run:
+        shell:
+          command: sdlc/bin/show-review "$1" "$2" "$3" "$4"
+          arguments:
+            - ${ $context.worktree }
+            - ${ $context.review }
+            - ${ $context.round + 1 | tostring }
+            - '5'
   - decide:
       switch:
         - over:
-            when: . == "merged" or . == "closed"
+            when: $context.review == "merged" or $context.review == "closed"
             then: retro
         - changes:
-            when: . == "changes"
+            when: $context.review == "changes"
             then: revise
         - expired:
             when: $task.startedAt.epoch.seconds >= $context.reviewBy
             then: expire
         - pending:
             then: poll
+  - poll:
+      wait:
+        minutes: 5
+      then: reviewState
   - revise:
       run:
         shell:
