@@ -40,6 +40,16 @@ do:
             - ${ $context.summary }
       export:
         as: '$context + { pullRequest: . }'
+  # Never fails: if Orca can't be updated, that's logged, and the run goes on.
+  - announce:
+      run:
+        shell:
+          command: sdlc/bin/announce-pr "$1" "$2" "$3" "$4"
+          arguments:
+            - ${ $context.repo }
+            - ${ $context.issue }
+            - ${ $context.worktree }
+            - ${ $context.pullRequest }
   # Never fails: a failed retrospective is logged, and the pull request stands.
   - retro:
       run:
