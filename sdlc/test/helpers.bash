@@ -36,6 +36,13 @@ expect() {
   fi
 }
 
+# Prints the scripts the workflows in sdlc/*.yaml run, one per line: the
+# first word of each command, where it's a path. Run from $root.
+workflow_scripts() {
+  sed -nE 's/^[[:space:]]*command:[[:space:]]*["'\'']?([^[:space:]"'\'']+).*/\1/p' sdlc/*.yaml |
+    grep / | sort -u
+}
+
 # Makes a bare remote at $tmp/origin.git and a clone of it at $tmp/$1 with
 # one commit on main.
 remote() {

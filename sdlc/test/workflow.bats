@@ -26,10 +26,8 @@ setup() {
 }
 
 @test "every script a workflow runs is committed executable and run by path in a test" {
-  # The first word of each command a workflow runs, where it's a path.
   local scripts
-  scripts=$(sed -nE 's/^[[:space:]]*command:[[:space:]]*["'\'']?([^[:space:]"'\'']+).*/\1/p' sdlc/*.yaml |
-    grep / | sort -u)
+  scripts=$(workflow_scripts)
   [ -n "$scripts" ]
 
   local code problems="" script mode
