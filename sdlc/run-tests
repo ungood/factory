@@ -10,6 +10,10 @@
 # sdlc/test/gate.bats. With none, runs every test in sdlc/test.
 set -euo pipefail
 
+# Git hooks run with GIT_DIR and the like set to the repo being pushed, which
+# would point every git command here and in the tests at that repo.
+while read -r var; do unset "$var"; done < <(git rev-parse --local-env-vars)
+
 root=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX")
 export="$tmp/export"
