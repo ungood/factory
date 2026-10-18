@@ -123,7 +123,7 @@ The run's record is in the current directory:
 - \`run.json\`: the marche run's tasks, with their outputs and errors.
 - \`logs/<step>/\`: each step's standard output and error, one pair of files per attempt. \`logs/gate/\` is the gate's output, and \`logs/agent/\` includes the task the agent was given.
 
-The workflow's own definition and scripts are in the factory workplace, $workplace, under \`sdlc/\`. The repo the run worked on is checked out at $worktree.
+The workflow's own definition and scripts are in the factory workplace, $workplace, under \`sdlc/\`. The run pinned the scripts it started with, and ran them from $(dirname "$bin"), so they may differ from the workplace's. The repo the run worked on is checked out at $worktree.
 
 Look for friction in the run:
 

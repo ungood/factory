@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Copies the SDLC's scripts at the factory checkout's commit into the run's
+# state directory, so every later step runs the scripts the run started
+# with, even after the checkout moves on.
+#
+# Usage: pin <repo> <issue> <run>
+#
+# Run it from the factory checkout. <repo> is a path to the checkout the run
+# works on, relative to the current directory, and <run> is the workflow
+# run's ID. Prints the copy and the factory commit as JSON: {"sdlc",
+# "factory"}. The copy is of the commit, so uncommitted changes to sdlc/
+# aren't in it.
+#
+# A retried step finds the first attempt's copy and keeps it.
+set -euo pipefail
+
+repo=$(git -C "$1" rev-parse --show-toplevel)
+issue=$2
+run=$3
+state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
+pinned="$state/runs/$run"
+
+if [ ! -f "$pinned/factory" ]; then
+  commit=$(git rev-parse HEAD)
+  echo "pin: copying sdlc/ at $commit" >&2
+  rm -rf "$pinned.tmp"
+  mkdir -p "$pinned.tmp"
+  git archive "$commit" sdlc | tar -x -C "$pinned.tmp"
+  echo "$commit" >"$pinned.tmp/factory"
+  mkdir -p "$state/runs"
+  rm -rf "$pinned"
+  mv "$pinned.tmp" "$pinned"
+fi
+
+jq -nc --arg sdlc "$pinned/sdlc" --arg factory "$(cat "$pinned/factory")" '{sdlc: $sdlc, factory: $factory}'

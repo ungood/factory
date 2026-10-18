@@ -12,13 +12,30 @@ do:
         issue: ${ .issue | tostring }
       export:
         as: '.'
+  # Copies sdlc/ at the factory's commit into the run's state directory.
+  # Every later step calls the scripts from that copy, so a run keeps the
+  # scripts it started with, as it keeps its definition, even after the
+  # factory checkout is pulled.
+  - pin:
+      run:
+        shell:
+          command: sdlc/bin/pin "$1" "$2" "$3"
+          arguments:
+            - ${ $context.repo }
+            - ${ $context.issue }
+            - ${ $workflow.id }
+      output:
+        as: ${ fromjson }
+      export:
+        as: '$context + .'
   # Creates the worktree and installs the repo's tools and dependencies, so
   # the agent starts in a ready worktree.
   - prepare:
       run:
         shell:
-          command: sdlc/bin/prepare "$1" "$2"
+          command: '"$1"/bin/prepare "$2" "$3"'
           arguments:
+            - ${ $context.sdlc }
             - ${ $context.repo }
             - ${ $context.issue }
       output:
@@ -28,8 +45,9 @@ do:
   - agent:
       run:
         shell:
-          command: sdlc/bin/agent "$1" "$2" "$3"
+          command: '"$1"/bin/agent "$2" "$3" "$4"'
           arguments:
+            - ${ $context.sdlc }
             - ${ $context.repo }
             - ${ $context.issue }
             - ${ $context.worktree }
@@ -40,14 +58,16 @@ do:
   - gate:
       run:
         shell:
-          command: sdlc/bin/gate "$1"
+          command: '"$1"/bin/gate "$2"'
           arguments:
+            - ${ $context.sdlc }
             - ${ $context.worktree }
   - pullRequest:
       run:
         shell:
-          command: sdlc/bin/open-pr "$1" "$2" "$3" "$4"
+          command: '"$1"/bin/open-pr "$2" "$3" "$4" "$5"'
           arguments:
+            - ${ $context.sdlc }
             - ${ $context.worktree }
             - ${ $context.issue }
             - ${ $context.title }
@@ -58,8 +78,9 @@ do:
   - announce:
       run:
         shell:
-          command: sdlc/bin/announce-pr "$1" "$2" "$3" "$4"
+          command: '"$1"/bin/announce-pr "$2" "$3" "$4" "$5"'
           arguments:
+            - ${ $context.sdlc }
             - ${ $context.repo }
             - ${ $context.issue }
             - ${ $context.worktree }
@@ -87,8 +108,9 @@ do:
         - check:
             run:
               shell:
-                command: sdlc/bin/review-state "$1" "$2" "$3"
+                command: '"$1"/bin/review-state "$2" "$3" "$4"'
                 arguments:
+                  - ${ $context.sdlc }
                   - ${ $context.repo }
                   - ${ $context.issue }
                   - ${ $context.pullRequest }
@@ -120,8 +142,9 @@ do:
   - revise:
       run:
         shell:
-          command: sdlc/bin/revise "$1" "$2" "$3" "$4" "$5"
+          command: '"$1"/bin/revise "$2" "$3" "$4" "$5" "$6"'
           arguments:
+            - ${ $context.sdlc }
             - ${ $context.repo }
             - ${ $context.issue }
             - ${ $context.worktree }
@@ -130,14 +153,16 @@ do:
   - regate:
       run:
         shell:
-          command: sdlc/bin/gate "$1"
+          command: '"$1"/bin/gate "$2"'
           arguments:
+            - ${ $context.sdlc }
             - ${ $context.worktree }
   - reply:
       run:
         shell:
-          command: sdlc/bin/reply "$1" "$2" "$3" "$4" "$5"
+          command: '"$1"/bin/reply "$2" "$3" "$4" "$5" "$6"'
           arguments:
+            - ${ $context.sdlc }
             - ${ $context.repo }
             - ${ $context.issue }
             - ${ $context.worktree }
@@ -158,8 +183,9 @@ do:
   - retro:
       run:
         shell:
-          command: sdlc/bin/retro "$1" "$2" "$3" "$4" "$5"
+          command: '"$1"/bin/retro "$2" "$3" "$4" "$5" "$6"'
           arguments:
+            - ${ $context.sdlc }
             - ${ $context.repo }
             - ${ $context.issue }
             - ${ $context.worktree }
@@ -181,14 +207,15 @@ do:
   - cleanup:
       run:
         shell:
-          command: sdlc/bin/cleanup "$1" "$2" "$3" "$4"
+          command: '"$1"/bin/cleanup "$2" "$3" "$4" "$5"'
           arguments:
+            - ${ $context.sdlc }
             - ${ $context.repo }
             - ${ $context.worktree }
             - ${ $context.branch }
             - ${ $context.pullRequest }
       output:
-        as: '{ pullRequest: $context.pullRequest, review: $context.review, rounds: $context.round, retro: $context.retro }'
+        as: '{ pullRequest: $context.pullRequest, review: $context.review, rounds: $context.round, retro: $context.retro, factory: $context.factory }'
       then: end
   # A pull request closed without merging keeps its worktree, in case the
   # work is wanted after all.
@@ -199,6 +226,7 @@ do:
         rounds: ${ $context.round }
         retro: ${ $context.retro }
         worktree: ${ $context.worktree }
+        factory: ${ $context.factory }
       then: end
   - giveUp:
       raise:
