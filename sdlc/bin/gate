@@ -5,7 +5,8 @@
 # Usage: gate <worktree>
 #
 # Fails when the worktree has uncommitted changes, has no commits beyond the
-# default branch, or fails the repo's lint or test task.
+# default branch, or fails the repo's checks. A repo's checks are its ci task
+# if it defines one, or else its lint and test tasks, where they exist.
 set -euo pipefail
 
 cd "$1"
@@ -25,8 +26,14 @@ fi
 
 # A new worktree is a new path, which mise hasn't been told to trust.
 mise trust --quiet .
-for task in lint test; do
-  if mise tasks info "$task" >/dev/null 2>&1; then
+has_task() { mise tasks info "$1" >/dev/null 2>&1; }
+if has_task ci; then
+  tasks=(ci)
+else
+  tasks=(lint test)
+fi
+for task in "${tasks[@]}"; do
+  if has_task "$task"; then
     log "mise run $task"
     mise run "$task" >&2
   fi
