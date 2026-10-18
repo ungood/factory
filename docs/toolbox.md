@@ -72,6 +72,7 @@ Deterministic checks come first: formatters, linters, static analysis, type chec
 
 - **License:** MIT. A `LICENSE` file ("Copyright (c) <year> Jason Walker") plus the manifest field (`license = "MIT"`). Not Apache-2.0, and not the Rust-conventional dual license.
 - **Default branch:** `main`. PRs and release tags target it.
+- **Merged branches:** GitHub deletes a PR's head branch when it merges (`delete_branch_on_merge`). Turn it on when creating a repo.
 - **Forge:** GitHub under `ungood`. CI runs on GitHub Actions, and projects are tracked in GitHub Issues.
 - **Commits:** conventional prefixes (`feat:`, `fix:`, `chore:`), signed through 1Password. Never bypass signing. PR titles are checked for the same format.
 - **Releases:** automated from conventional commits. The cyc-seattle repos run semantic-release on every push to `main`. Rust releases still need a matching choice (see open questions).
@@ -102,7 +103,7 @@ Deterministic checks come first: formatters, linters, static analysis, type chec
 - **Models:** no xAI; prefer not to use OpenAI.
 - **Agent environment:** [Orca](https://github.com/stablyai/orca) is the terminal and diff surface for agent work, with telemetry turned off. cmux is a close second. Paseo was a good fit but can't be used at work. See [ADEs](../research/ades.md).
 - **Orchestration:** hand work off through Orca terminals and worktrees, not by messaging other sessions.
-- **Workflows:** [marche](marche.md) runs long-lived agent pipelines. Workflows are written in Pkl, rendered to Serverless Workflow 1.0 YAML, and run by Zigflow on Temporal. See [Workflow Languages](../research/workflow-languages.md).
+- **Workflows:** [marche](marche.md) runs long-lived agent pipelines. Workflows are Open Workflow Specification YAML, written in Pkl from marche's M2, and run by marche's Rust interpreter on Temporal. Temporal's dev server runs on the laptop as a user service. See [Workflow Languages](../research/workflow-languages.md).
 - **Naming:** factory tools follow the *mise en place* kitchen theme of `mise`, `place` and `marche`.
 - **Review:** agent changes are reviewed in Orca's diff view, with inline comments sent back to the agent. See [Review Tools](../research/review-tools.md).
 - **Skills are project-agnostic:** project bindings go in the repo's agent docs, not in the skill.
@@ -124,5 +125,4 @@ Personal tools that don't affect what the factory produces:
 - What the factory's own dependency update workflow looks like.
 - Rust releases: release-plz (release PRs), or semantic-release with a Cargo plugin to match the TypeScript repos?
 - Which proposed treefmt formatters earn a slot, and is `treefmt.toml` or treefmt-nix the config?
-- Whether to stay on Ghostty outside Orca, and whether Orca's CLI covers what marche needs: see [Terminal Orchestration](../research/terminal-orchestration.md).
-- Whether Temporal is acceptable on a laptop: see [marche](marche.md).
+- Whether to stay on Ghostty outside Orca, and whether Orca's CLI covers what an agent shim for marche needs: see [Terminal Orchestration](../research/terminal-orchestration.md).
