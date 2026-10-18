@@ -167,11 +167,12 @@ do:
   - cleanup:
       run:
         shell:
-          command: sdlc/bin/cleanup "$1" "$2" "$3"
+          command: sdlc/bin/cleanup "$1" "$2" "$3" "$4"
           arguments:
             - ${ $context.repo }
             - ${ $context.worktree }
             - ${ $context.branch }
+            - ${ $context.pullRequest }
       output:
         as: '{ pullRequest: $context.pullRequest, review: $context.review, rounds: $context.round, retro: $context.retro }'
       then: end
