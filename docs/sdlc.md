@@ -145,6 +145,7 @@ Each step has its own doc in [`sdlc/docs`](../sdlc/docs), named after the script
 - [Revise](../sdlc/docs/revise.md): sends my feedback to the agent.
 - [Reply](../sdlc/docs/reply.md): pushes and replies to my feedback.
 - [Retrospective](../sdlc/docs/retro.md): files issues from the run's friction.
+- [End](../sdlc/docs/end-run.md): shows that a run ended without a merge.
 - [Cleanup](../sdlc/docs/cleanup.md): removes the worktree after a merge.
 
 Everything else is still manual: I triage, including the `retro` issues, plan in plan mode, review, and merge.

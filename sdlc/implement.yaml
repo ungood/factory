@@ -12,211 +12,276 @@ do:
         issue: ${ .issue | tostring }
       export:
         as: '.'
-  # Creates the worktree and installs the repo's tools and dependencies, so
-  # the agent starts in a ready worktree.
-  - prepare:
-      run:
-        shell:
-          command: sdlc/bin/prepare "$1" "$2"
-          arguments:
-            - ${ $context.repo }
-            - ${ $context.issue }
-      output:
-        as: ${ fromjson }
-      export:
-        as: '$context + .'
-  - agent:
-      run:
-        shell:
-          command: sdlc/bin/agent "$1" "$2" "$3"
-          arguments:
-            - ${ $context.repo }
-            - ${ $context.issue }
-            - ${ $context.worktree }
-      output:
-        as: ${ fromjson }
-      export:
-        as: '$context + .'
-  - gate:
-      run:
-        shell:
-          command: sdlc/bin/gate "$1"
-          arguments:
-            - ${ $context.worktree }
-  - pullRequest:
-      run:
-        shell:
-          command: sdlc/bin/open-pr "$1" "$2" "$3" "$4"
-          arguments:
-            - ${ $context.worktree }
-            - ${ $context.issue }
-            - ${ $context.title }
-            - ${ $context.summary }
-      export:
-        as: '$context + { pullRequest: . }'
-  # Never fails: if Orca can't be updated, that's logged, and the run goes on.
-  - announce:
-      run:
-        shell:
-          command: sdlc/bin/announce-pr "$1" "$2" "$3" "$4"
-          arguments:
-            - ${ $context.repo }
-            - ${ $context.issue }
-            - ${ $context.worktree }
-            - ${ $context.pullRequest }
-  # The review loop. The agent's first pass was round 1, and each round of
-  # the reviewer's feedback is the next. The workflow never merges: whoever
-  # merges the pull request approves it. The run waits up to 7 days for each
-  # review.
-  - startReview:
-      set:
-        round: 1
-      export:
-        as: '$context + .'
-  - awaitReview:
-      set:
-        reviewBy: ${ $task.startedAt.epoch.seconds + 7 * 24 * 60 * 60 }
-      export:
-        as: '$context + .'
-  # Checks right away, so a restarted run, or one back from a round, sees
-  # feedback that's already there. Rides out a few minutes without GitHub, such as a laptop waking up.
-  - reviewState:
+  # Everything after remember runs in one try, so a run that faults, or
+  # gives up on its review, says so before it ends. Flow directives such as
+  # then: retro stay within it.
+  - implement:
       try:
-        - check:
-            run:
-              shell:
-                command: sdlc/bin/review-state "$1" "$2" "$3"
-                arguments:
-                  - ${ $context.repo }
-                  - ${ $context.issue }
-                  - ${ $context.pullRequest }
+      # Creates the worktree and installs the repo's tools and dependencies, so
+      # the agent starts in a ready worktree.
+      - prepare:
+          run:
+            shell:
+              command: sdlc/bin/prepare "$1" "$2"
+              arguments:
+                - ${ $context.repo }
+                - ${ $context.issue }
+          output:
+            as: ${ fromjson }
+          export:
+            as: '$context + .'
+      - agent:
+          run:
+            shell:
+              command: sdlc/bin/agent "$1" "$2" "$3"
+              arguments:
+                - ${ $context.repo }
+                - ${ $context.issue }
+                - ${ $context.worktree }
+          output:
+            as: ${ fromjson }
+          export:
+            as: '$context + .'
+      - gate:
+          run:
+            shell:
+              command: sdlc/bin/gate "$1"
+              arguments:
+                - ${ $context.worktree }
+      - pullRequest:
+          run:
+            shell:
+              command: sdlc/bin/open-pr "$1" "$2" "$3" "$4"
+              arguments:
+                - ${ $context.worktree }
+                - ${ $context.issue }
+                - ${ $context.title }
+                - ${ $context.summary }
+          export:
+            as: '$context + { pullRequest: . }'
+      # Never fails: if Orca can't be updated, that's logged, and the run goes on.
+      - announce:
+          run:
+            shell:
+              command: sdlc/bin/announce-pr "$1" "$2" "$3" "$4"
+              arguments:
+                - ${ $context.repo }
+                - ${ $context.issue }
+                - ${ $context.worktree }
+                - ${ $context.pullRequest }
+      # The review loop. The agent's first pass was round 1, and each round of
+      # the reviewer's feedback is the next. The workflow never merges: whoever
+      # merges the pull request approves it. The run waits up to 7 days for each
+      # review.
+      - startReview:
+          set:
+            round: 1
+          export:
+            as: '$context + .'
+      - awaitReview:
+          set:
+            reviewBy: ${ $task.startedAt.epoch.seconds + 7 * 24 * 60 * 60 }
+          export:
+            as: '$context + .'
+      # Checks right away, so a restarted run, or one back from a round, sees
+      # feedback that's already there. Rides out a few minutes without GitHub, such as a laptop waking up.
+      - reviewState:
+          try:
+            - check:
+                run:
+                  shell:
+                    command: sdlc/bin/review-state "$1" "$2" "$3"
+                    arguments:
+                      - ${ $context.repo }
+                      - ${ $context.issue }
+                      - ${ $context.pullRequest }
+          catch:
+            errors:
+              with:
+                type: https://open-workflow-specification.org/spec/1.0.0/errors/runtime
+            retry:
+              delay:
+                minutes: 1
+              limit:
+                duration:
+                  hours: 1
+          export:
+            as: '$context + { review: . }'
+      # Never fails: if Orca can't be updated, that's logged, and the run goes on.
+      # The last argument is poll's wait in minutes, for the next check's time.
+      - showReview:
+          run:
+            shell:
+              command: sdlc/bin/show-review "$1" "$2" "$3" "$4"
+              arguments:
+                - ${ $context.worktree }
+                - ${ $context.review }
+                - ${ $context.round + 1 | tostring }
+                - '5'
+      - decide:
+          switch:
+            - over:
+                when: $context.review == "merged" or $context.review == "closed"
+                then: retro
+            - changes:
+                when: $context.review == "changes"
+                then: revise
+            - expired:
+                when: $task.startedAt.epoch.seconds >= $context.reviewBy
+                then: expire
+            - pending:
+                then: poll
+      - poll:
+          wait:
+            minutes: 5
+          then: reviewState
+      - revise:
+          run:
+            shell:
+              command: sdlc/bin/revise "$1" "$2" "$3" "$4" "$5"
+              arguments:
+                - ${ $context.repo }
+                - ${ $context.issue }
+                - ${ $context.worktree }
+                - ${ $context.pullRequest }
+                - ${ $context.round + 1 | tostring }
+      - regate:
+          run:
+            shell:
+              command: sdlc/bin/gate "$1"
+              arguments:
+                - ${ $context.worktree }
+      - reply:
+          run:
+            shell:
+              command: sdlc/bin/reply "$1" "$2" "$3" "$4" "$5"
+              arguments:
+                - ${ $context.repo }
+                - ${ $context.issue }
+                - ${ $context.worktree }
+                - ${ $context.pullRequest }
+                - ${ $context.round + 1 | tostring }
+      - nextRound:
+          set:
+            round: ${ $context.round + 1 }
+          export:
+            as: '$context + .'
+          then: awaitReview
+      - expire:
+          set:
+            review: expired
+          export:
+            as: '$context + .'
+      # Never fails: a failed retrospective is logged, and the pull request stands.
+      - retro:
+          run:
+            shell:
+              command: sdlc/bin/retro "$1" "$2" "$3" "$4" "$5"
+              arguments:
+                - ${ $context.repo }
+                - ${ $context.issue }
+                - ${ $context.worktree }
+                - ${ $context.pullRequest }
+                - ${ $workflow.id }
+          export:
+            as: '$context + { retro: fromjson }'
+      - finish:
+          switch:
+            - merged:
+                when: $context.review == "merged"
+                then: cleanup
+            - expired:
+                when: $context.review == "expired"
+                then: giveUp
+            - closed:
+                then: closed
+      # Never fails: anything it can't remove is logged and left in place.
+      - cleanup:
+          run:
+            shell:
+              command: sdlc/bin/cleanup "$1" "$2" "$3" "$4"
+              arguments:
+                - ${ $context.repo }
+                - ${ $context.worktree }
+                - ${ $context.branch }
+                - ${ $context.pullRequest }
+          output:
+            as: '{ pullRequest: $context.pullRequest, review: $context.review, rounds: $context.round, retro: $context.retro }'
+          then: end
+      # A pull request closed without merging keeps its worktree, in case the
+      # work is wanted after all. Never fails: if Orca can't be updated, that's
+      # logged, and the run goes on.
+      - closed:
+          run:
+            shell:
+              command: sdlc/bin/end-run closed "$1" "$2" "$3" "$4"
+              arguments:
+                - ${ $context.repo }
+                - ${ $context.issue }
+                - ${ $context.worktree }
+                - ${ $context.pullRequest }
+      - keep:
+          set:
+            pullRequest: ${ $context.pullRequest }
+            review: ${ $context.review }
+            rounds: ${ $context.round }
+            retro: ${ $context.retro }
+            worktree: ${ $context.worktree }
+          then: end
+      - giveUp:
+          raise:
+            error:
+              type: https://github.com/ungood/factory/errors/review-timed-out
+              status: 408
+              title: No review within 7 days
+              detail: ${ "Nobody reviewed \($context.pullRequest) within 7 days, so the run ended without merging it. The pull request and its worktree are still there." }
+      # A run that ends any other way than a merge or a close, by faulting
+      # or by giving up on the review, says so in Orca and the agent's
+      # terminal, so it never looks like one that's still waiting. Then it
+      # faults with the same error. A raise's status can't be an expression,
+      # so there's one for each status marche raises.
       catch:
-        errors:
-          with:
-            type: https://open-workflow-specification.org/spec/1.0.0/errors/runtime
-        retry:
-          delay:
-            minutes: 1
-          limit:
-            duration:
-              hours: 1
-      export:
-        as: '$context + { review: . }'
-  # Never fails: if Orca can't be updated, that's logged, and the run goes on.
-  # The last argument is poll's wait in minutes, for the next check's time.
-  - showReview:
-      run:
-        shell:
-          command: sdlc/bin/show-review "$1" "$2" "$3" "$4"
-          arguments:
-            - ${ $context.worktree }
-            - ${ $context.review }
-            - ${ $context.round + 1 | tostring }
-            - '5'
-  - decide:
-      switch:
-        - over:
-            when: $context.review == "merged" or $context.review == "closed"
-            then: retro
-        - changes:
-            when: $context.review == "changes"
-            then: revise
-        - expired:
-            when: $task.startedAt.epoch.seconds >= $context.reviewBy
-            then: expire
-        - pending:
-            then: poll
-  - poll:
-      wait:
-        minutes: 5
-      then: reviewState
-  - revise:
-      run:
-        shell:
-          command: sdlc/bin/revise "$1" "$2" "$3" "$4" "$5"
-          arguments:
-            - ${ $context.repo }
-            - ${ $context.issue }
-            - ${ $context.worktree }
-            - ${ $context.pullRequest }
-            - ${ $context.round + 1 | tostring }
-  - regate:
-      run:
-        shell:
-          command: sdlc/bin/gate "$1"
-          arguments:
-            - ${ $context.worktree }
-  - reply:
-      run:
-        shell:
-          command: sdlc/bin/reply "$1" "$2" "$3" "$4" "$5"
-          arguments:
-            - ${ $context.repo }
-            - ${ $context.issue }
-            - ${ $context.worktree }
-            - ${ $context.pullRequest }
-            - ${ $context.round + 1 | tostring }
-  - nextRound:
-      set:
-        round: ${ $context.round + 1 }
-      export:
-        as: '$context + .'
-      then: awaitReview
-  - expire:
-      set:
-        review: expired
-      export:
-        as: '$context + .'
-  # Never fails: a failed retrospective is logged, and the pull request stands.
-  - retro:
-      run:
-        shell:
-          command: sdlc/bin/retro "$1" "$2" "$3" "$4" "$5"
-          arguments:
-            - ${ $context.repo }
-            - ${ $context.issue }
-            - ${ $context.worktree }
-            - ${ $context.pullRequest }
-            - ${ $workflow.id }
-      export:
-        as: '$context + { retro: fromjson }'
-  - finish:
-      switch:
-        - merged:
-            when: $context.review == "merged"
-            then: cleanup
-        - expired:
-            when: $context.review == "expired"
-            then: giveUp
-        - closed:
-            then: closed
-  # Never fails: anything it can't remove is logged and left in place.
-  - cleanup:
-      run:
-        shell:
-          command: sdlc/bin/cleanup "$1" "$2" "$3" "$4"
-          arguments:
-            - ${ $context.repo }
-            - ${ $context.worktree }
-            - ${ $context.branch }
-            - ${ $context.pullRequest }
-      output:
-        as: '{ pullRequest: $context.pullRequest, review: $context.review, rounds: $context.round, retro: $context.retro }'
-      then: end
-  # A pull request closed without merging keeps its worktree, in case the
-  # work is wanted after all.
-  - closed:
-      set:
-        pullRequest: ${ $context.pullRequest }
-        review: ${ $context.review }
-        rounds: ${ $context.round }
-        retro: ${ $context.retro }
-        worktree: ${ $context.worktree }
-      then: end
-  - giveUp:
-      raise:
-        error:
-          type: https://github.com/ungood/factory/errors/review-timed-out
-          status: 408
-          title: No review within 7 days
-          detail: ${ "Nobody reviewed \($context.pullRequest) within 7 days, so the run ended without merging it. The pull request and its worktree are still there." }
+        as: fault
+        do:
+          # Never fails: if Orca can't be updated, that's logged.
+          - faulted:
+              run:
+                shell:
+                  command: sdlc/bin/end-run faulted "$1" "$2" "$3" "$4" "$5"
+                  arguments:
+                    - ${ $context.repo }
+                    - ${ $context.issue }
+                    - ${ $context.worktree // "" }
+                    - ${ $workflow.id }
+                    - ${ $fault | tojson }
+          - refault:
+              switch:
+                - invalid:
+                    when: $fault.status == 400
+                    then: fault400
+                - timedOut:
+                    when: $fault.status == 408
+                    then: fault408
+                - other:
+                    then: fault500
+          - fault400:
+              raise:
+                error:
+                  type: ${ $fault.type }
+                  status: 400
+                  title: ${ $fault.title }
+                  detail: '${ "At \($fault.instance): \($fault.detail // "")" }'
+          - fault408:
+              raise:
+                error:
+                  type: ${ $fault.type }
+                  status: 408
+                  title: ${ $fault.title }
+                  detail: '${ "At \($fault.instance): \($fault.detail // "")" }'
+          - fault500:
+              raise:
+                error:
+                  type: ${ $fault.type }
+                  status: 500
+                  title: ${ $fault.title }
+                  detail: '${ "At \($fault.instance): \($fault.detail // "")" }'
