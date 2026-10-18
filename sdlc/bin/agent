@@ -16,6 +16,7 @@ set -euo pipefail
 
 repo=$(git -C "$1" rev-parse --show-toplevel)
 issue=$2
+bin=$(cd "$(dirname "$0")" && pwd)
 name="issue-$issue"
 state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
 result="$state/result.json"
@@ -89,6 +90,8 @@ When you're done, write this JSON to \`$result\`:
 
 If you're blocked and need a person, write {"status": "blocked", "summary": "<what's blocking you>"} instead. A person may be watching this terminal and may take over; if they do, follow their lead.
 
+Writing the result file must be your last action: the workflow reads it as soon as you're back at your prompt. Write it to \`$result.tmp\` first, then \`mv\` it into place, so the workflow never sees a half-written file.
+
 $(cat "$state/issue.md")
 EOF
 
@@ -117,23 +120,16 @@ EOF
     orca worktree set --worktree "id:$worktree_id" --comment "implementing #$issue" \
       --workspace-status in-progress --json >/dev/null || true
   fi
-
-  # Claude runs inside the terminal's shell, so the terminal outlives it.
-  # Only a closed terminal means nobody can finish the work.
-  log "waiting for $result"
-  while [ ! -f "$result" ]; do
-    sleep 10
-    if [ ! -f "$result" ] && ! has_terminal "$terminal"; then
-      log "the agent's terminal closed without writing $result"
-      exit 1
-    fi
-  done
 fi
 
+# A retried step also waits for the agent to go idle, in case the worker
+# crashed while the agent was still editing its result.
+terminal=$(cat "$state/terminal" 2>/dev/null || true)
+answer=$("$bin/await-result" "$result" "$terminal" "id:$worktree_id")
 jq -c --arg worktree "$path" --arg branch "$branch" \
-  '{worktree: $worktree, branch: $branch} + .' "$result"
-status=$(jq -r '.status' "$result")
+  '{worktree: $worktree, branch: $branch} + .' <<<"$answer"
+status=$(jq -r '.status' <<<"$answer")
 if [ "$status" != "done" ]; then
-  log "the agent reported $status: $(jq -r '.summary' "$result")"
+  log "the agent reported $status: $(jq -r '.summary' <<<"$answer")"
   exit 1
 fi
