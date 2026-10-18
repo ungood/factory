@@ -1,4 +1,5 @@
 # Each repo in place.toml needs a line here.
+/marche/
 /place/
 
 mise.local.toml

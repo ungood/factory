@@ -1,2 +1,5 @@
 [repos.place]
 url = "https://github.com/ungood/place.git"
+
+[repos.marche]
+url = "https://github.com/ungood/marche.git"
