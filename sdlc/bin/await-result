@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Waits for an agent's result file, then for the agent's terminal to go
+# idle, so edits the agent makes after first writing the file count.
+#
+# Usage: await-result <result> <terminal> <worktree>
+#
+# <terminal> is the handle of the agent's terminal and <worktree> an Orca
+# worktree selector for the worktree it's in, such as id:<id> or path:<path>.
+# Prints the result as compact JSON. Exits non-zero when the terminal closes
+# without writing the file, or when the file isn't a JSON object.
+set -euo pipefail
+
+result=$1
+terminal=$2
+worktree=$3
+poll=${FACTORY_POLL_SECONDS:-10}
+
+log() { echo "await-result: $*" >&2; }
+
+has_terminal() {
+  orca terminal list --worktree "$worktree" --json |
+    jq -e --arg t "$terminal" 'any(.result.terminals[]; .handle == $t)' >/dev/null
+}
+
+# Claude runs inside the terminal's shell, so the terminal outlives it.
+# Only a closed terminal means nobody can finish the work.
+if [ ! -f "$result" ]; then
+  log "waiting for $result"
+fi
+while [ ! -f "$result" ]; do
+  sleep "$poll"
+  if [ ! -f "$result" ] && ! has_terminal; then
+    log "the agent's terminal $terminal closed without writing $result"
+    exit 1
+  fi
+done
+
+# The agent may still be editing the file, or may not have finished writing
+# it, so wait until it's back at its prompt. orca terminal wait exits
+# non-zero when it times out, so read satisfied from its output instead.
+while has_terminal; do
+  idle=$(orca terminal wait --terminal "$terminal" --for tui-idle --timeout-ms 600000 --json 2>/dev/null |
+    jq -r '.result.wait.satisfied // false' || true)
+  [ "$idle" = true ] && break
+  log "the agent in $terminal is still busy after writing $result"
+done
+
+if ! jq -e 'type == "object"' "$result" >/dev/null 2>&1; then
+  log "$result isn't a JSON object. Fix it, then retry the step."
+  exit 1
+fi
+jq -c . "$result"

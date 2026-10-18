@@ -65,6 +65,8 @@ When you're done, write this JSON to \`$result\`:
     {"status": "done", "summary": "<what changed in this round>", "replies": [{"id": "<the item's id>", "body": "<Markdown reply>"}]}
 
 Reply to each item with what you did, or why you disagree. If you're blocked and need a person, write {"status": "blocked", "summary": "<what's blocking you>"} instead.
+
+Writing the result file must be your last action: the workflow reads it as soon as you're back at your prompt. Write it to \`$result.tmp\` first, then \`mv\` it into place, so the workflow never sees a half-written file.
 EOF
     # Wait for Claude's prompt, so the message isn't typed into a busy
     # session. After ten minutes, send it anyway, and Claude queues it.
@@ -76,24 +78,19 @@ EOF
     orca worktree set --worktree "path:$worktree" --comment "addressing review feedback, round $round" \
       --workspace-status in-progress --json >/dev/null || log "couldn't update the worktree $worktree in Orca"
   fi
-
-  log "waiting for $result"
-  while [ ! -f "$result" ]; do
-    sleep 10
-    if [ ! -f "$result" ] && ! orca terminal list --worktree "path:$worktree" --json |
-      jq -e --arg t "$terminal" 'any(.result.terminals[]; .handle == $t)' >/dev/null; then
-      log "the agent's terminal closed without writing $result"
-      exit 1
-    fi
-  done
 fi
+
+# A retried step also waits for the agent to go idle, in case the worker
+# crashed while the agent was still editing its result.
+terminal=$(cat "$state/terminal" 2>/dev/null || true)
+answer=$("$bin/await-result" "$result" "$terminal" "path:$worktree")
 
 # The round handled everything it was sent.
 jq -r '.[].id' "$feedback" >>"$state/handled"
 
-jq -c . "$result"
-status=$(jq -r '.status' "$result")
+echo "$answer"
+status=$(jq -r '.status' <<<"$answer")
 if [ "$status" != "done" ]; then
-  log "the agent reported $status: $(jq -r '.summary' "$result")"
+  log "the agent reported $status: $(jq -r '.summary' <<<"$answer")"
   exit 1
 fi
