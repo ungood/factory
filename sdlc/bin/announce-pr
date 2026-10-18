@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Shows an implement run's pull request in Orca: links it to the run's
+# worktree, moves the worktree to in-review and marks it unread, and types the
+# pull request's URL into the agent's terminal so the session knows about it.
+#
+# Usage: announce-pr <repo> <issue> <worktree> <pull request>
+#
+# <repo> is the path to the checkout the run worked on, relative to the
+# current directory. <pull request> is the pull request's URL. The step never
+# fails the run: anything Orca can't do is logged, and the script exits zero.
+set -uo pipefail
+
+log() { echo "announce-pr: $*" >&2; }
+trap 'exit 0' EXIT
+
+repo=$(git -C "$1" rev-parse --show-toplevel) || exit 0
+issue=$2
+worktree=$3
+# The previous step's output may end in a newline.
+url=$(tr -d "[:space:]" <<<"$4")
+number=${url##*/}
+state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
+
+if ! [[ "$number" =~ ^[0-9]+$ ]]; then
+  log "can't find a pull request number in $url"
+  exit 0
+fi
+
+if ! orca worktree set --worktree "path:$worktree" --pr "$number" \
+  --workspace-status in-review --comment "PR #$number is ready for review" \
+  --unread --json >/dev/null; then
+  log "couldn't update the worktree $worktree in Orca"
+fi
+
+if [ ! -f "$state/terminal" ]; then
+  log "there's no $state/terminal, so the agent won't hear about $url"
+  exit 0
+fi
+terminal=$(cat "$state/terminal")
+if ! orca terminal send --terminal "$terminal" \
+  --text "The workflow opened $url for this work." --enter --json >/dev/null; then
+  log "couldn't type $url into the agent's terminal $terminal"
+fi
