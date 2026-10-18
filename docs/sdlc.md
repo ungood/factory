@@ -133,23 +133,33 @@ The SDLC starts as the smallest workflow marche can run today and grows as march
 
 [`sdlc/implement.yaml`](../sdlc/implement.yaml) takes an issue through a PR and my review of it, until I merge it:
 
-1. **Agent:** [`sdlc/bin/agent`](../sdlc/bin/agent) creates an Orca worktree named `issue-<n>` and starts Claude in a terminal there, so I can watch it and take over. Claude writes tests, implements, and commits, then writes a result file with its status, a PR title and a summary, as its last action. The step waits for that file, then for Claude to go back to its prompt, so edits Claude makes after first writing the file still count. A result that isn't JSON fails the step. A retried step reuses the worktree, terminal and result, so a worker crash never starts a second agent.
-2. **Gate:** [`sdlc/bin/gate`](../sdlc/bin/gate) fails on uncommitted changes or a branch with no new commits, then runs the repo's `lint` and `test` tasks where they exist. It doesn't trust the agent's own report.
-3. **Pull request:** [`sdlc/bin/open-pr`](../sdlc/bin/open-pr) pushes the branch and opens a draft PR that closes the issue.
-4. **Announce:** [`sdlc/bin/announce-pr`](../sdlc/bin/announce-pr) links the PR to the run's Orca worktree, moves the worktree to `in-review` with a comment and marks it unread, and types the PR's URL into the agent's terminal. If Orca can't be updated, that's logged and the run goes on.
-5. **Review:** every five minutes, [`sdlc/bin/review-state`](../sdlc/bin/review-state) reports whether there's no new feedback (`pending`), new feedback (`changes`), or whether I `merged` the PR or `closed` it without merging. Only my own reviews and comments count, and none from round to round counts twice.
+1. **Prepare:** [`sdlc/bin/prepare`](../sdlc/bin/prepare) creates an Orca worktree named `issue-<n>`, then runs `mise trust` and `mise install` there, and the repo's `install` task if it defines one. A failure fails the run, with the task's output in the log. A retried step reuses the worktree.
+2. **Agent:** [`sdlc/bin/agent`](../sdlc/bin/agent) starts Claude in a terminal in the prepared worktree, so I can watch it and take over. Claude writes tests, implements, and commits, then writes a result file with its status, a PR title and a summary, as its last action. The step waits for that file, then for Claude to go back to its prompt, so edits Claude makes after first writing the file still count. A result that isn't JSON fails the step. A retried step reuses the terminal and result, so a worker crash never starts a second agent.
+3. **Gate:** [`sdlc/bin/gate`](../sdlc/bin/gate) fails on uncommitted changes or a branch with no new commits, then runs the repo's checks (see [Repo conventions](#repo-conventions)). It doesn't trust the agent's own report.
+4. **Pull request:** [`sdlc/bin/open-pr`](../sdlc/bin/open-pr) pushes the branch and opens a draft PR that closes the issue.
+5. **Announce:** [`sdlc/bin/announce-pr`](../sdlc/bin/announce-pr) links the PR to the run's Orca worktree, moves the worktree to `in-review` with a comment and marks it unread, and types the PR's URL into the agent's terminal. If Orca can't be updated, that's logged and the run goes on.
+6. **Review:** every five minutes, [`sdlc/bin/review-state`](../sdlc/bin/review-state) reports whether there's no new feedback (`pending`), new feedback (`changes`), or whether I `merged` the PR or `closed` it without merging. Only my own reviews and comments count, and none from round to round counts twice.
    - **Changes:** [`sdlc/bin/revise`](../sdlc/bin/revise) writes my new feedback to `feedback-<n>.json` in the run's state directory and sends it into the agent's own terminal, so the session keeps its context, then waits for `result-<n>.json` the same way. The first round of feedback is round 2, because the agent's first pass was round 1. The gate runs again, and [`sdlc/bin/reply`](../sdlc/bin/reply) pushes and posts the agent's reply to each piece of feedback: in its thread for an inline comment, and as a PR comment otherwise. If the agent's terminal has closed or no longer runs Claude, the run fails rather than starting a new agent.
    - **Merged:** my merge is the approval. The run moves on to the retrospective and then cleans up.
    - **Closed:** the run moves on to the retrospective and leaves the worktree.
    - **No review for 7 days:** the run ends without merging and says so, after the retrospective. The PR and its worktree stay.
 
    The worktree's Orca status follows along: `in-review` while the run waits for me, `in-progress` while the agent works, and `completed` after the merge.
-6. **Retrospective:** [`sdlc/bin/retro`](../sdlc/bin/retro) runs a headless, read-only `claude -p` over the issue, the PR diff, the agent's result file and Claude transcript, and the marche run's logs, including the gate's output. It proposes up to three issues from the friction it finds, each citing evidence from the run, and the script files them in this repo or the one the run worked on, labeled `retro` and linking the PR. The agent checks each repo's open issues first to avoid duplicates. A failed retrospective is logged and never fails the run. It runs after the review, so it sees each round of my feedback too. It also reads my reviews and comments that no round handled, such as a review I leave with the merge, and files an issue for each idea for follow-up work in them, on top of its own three. Comments posted after the run has finished aren't read yet.
-7. **Cleanup:** after a merge, [`sdlc/bin/cleanup`](../sdlc/bin/cleanup) closes the agent's Orca terminals, removes the worktree with `orca worktree rm`, and deletes the local branch. GitHub deletes the remote branch on merge. A worktree with uncommitted changes, or commits that were never pushed, stays in place and the log says so. The run's state directory stays as the record of the run. Cleanup never fails the run.
+7. **Retrospective:** [`sdlc/bin/retro`](../sdlc/bin/retro) runs a headless, read-only `claude -p` over the issue, the PR diff, the agent's result file and Claude transcript, and the marche run's logs, including the gate's output. It proposes up to three issues from the friction it finds, each citing evidence from the run, and the script files them in this repo or the one the run worked on, labeled `retro` and linking the PR. The agent checks each repo's open issues first to avoid duplicates. A failed retrospective is logged and never fails the run. It runs after the review, so it sees each round of my feedback too. It also reads my reviews and comments that no round handled, such as a review I leave with the merge, and files an issue for each idea for follow-up work in them, on top of its own three. Comments posted after the run has finished aren't read yet.
+8. **Cleanup:** after a merge, [`sdlc/bin/cleanup`](../sdlc/bin/cleanup) closes the agent's Orca terminals, removes the worktree with `orca worktree rm`, and deletes the local branch. GitHub deletes the remote branch on merge. A worktree with uncommitted changes, or commits that were never pushed, stays in place and the log says so. The run's state directory stays as the record of the run. Cleanup never fails the run.
 
 Everything else is still manual: I triage, including the `retro` issues, plan in plan mode, review, and merge.
 
 Orca puts worktrees outside the workplace, where its untracked `mise.local.toml` doesn't apply, so the agent and retrospective scripts copy `CLAUDE_CONFIG_DIR` from the source checkout. Without it, the agent would run on the wrong Claude account.
+
+### Repo conventions
+
+A repo opts in to the SDLC through its mise tasks:
+
+- **`install`:** optional. Whatever a fresh checkout needs beyond `mise install`, such as `node_modules` or generated code. Prepare runs it.
+- **`ci`:** the repo's checks. The gate runs `ci` if the repo defines it, or else `lint` and `test`, each where it exists.
+
+This repo defines `lint` and `test`. [isthmia](https://github.com/cyc-seattle/isthmia) defines `install` and `ci`.
 
 ### Running it
 

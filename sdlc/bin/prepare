@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Gets an Orca worktree for a GitHub issue ready for the agent: creates it,
+# then installs the repo's tools and dependencies there.
+#
+# Usage: prepare <repo> <issue>
+#
+# <repo> is a path to a checkout, relative to the current directory. Prints
+# the worktree as JSON: {"worktree", "branch"}. In the worktree, the script
+# runs mise trust and mise install, then the repo's install task if it
+# defines one. Their output goes to stderr, so a failure's output is in the
+# run's log.
+#
+# A retried step finds the worktree from the first attempt and installs
+# again, which mise makes cheap.
+set -euo pipefail
+
+repo=$(git -C "$1" rev-parse --show-toplevel)
+issue=$2
+name="issue-$issue"
+state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
+mkdir -p "$state"
+
+log() { echo "prepare: $*" >&2; }
+
+repo_id=$(orca repo list --json |
+  jq -r --arg path "$repo" '.result.repos[] | select(.path == $path) | .id')
+if [ -z "$repo_id" ]; then
+  log "Orca doesn't know $repo. Add it with: orca repo add --path $repo"
+  exit 1
+fi
+
+# Read the issue first, so a wrong number fails before anything is created.
+# The agent's task includes it.
+if [ ! -f "$state/issue.md" ]; then
+  nwo=$(gh repo view "$(git -C "$repo" remote get-url origin)" --json nameWithOwner -q .nameWithOwner)
+  gh issue view "$issue" -R "$nwo" --json title,body \
+    --template '# {{.title}}{{"\n\n"}}{{.body}}{{"\n"}}' >"$state/issue.md.tmp"
+  mv "$state/issue.md.tmp" "$state/issue.md"
+fi
+
+# Orca names the branch <git user>/<name> and the directory <name>.
+worktree=$(orca worktree list --repo "id:$repo_id" --json |
+  jq -c --arg name "$name" '[.result.worktrees[] | select(.path | endswith("/" + $name))][0] // empty')
+if [ -z "$worktree" ]; then
+  log "creating worktree $name"
+  worktree=$(orca worktree create --repo "id:$repo_id" --name "$name" --issue "$issue" \
+    --no-parent --setup skip --json | jq -c '.result.worktree')
+fi
+path=$(jq -r '.path' <<<"$worktree")
+branch=$(jq -r '.branch | sub("^refs/heads/"; "")' <<<"$worktree")
+
+# A new worktree is a new path, which mise hasn't been told to trust.
+cd "$path"
+run() {
+  log "$*"
+  if ! "$@" >&2; then
+    log "$* failed in $path"
+    exit 1
+  fi
+}
+run mise trust --quiet .
+run mise install
+if mise tasks info install >/dev/null 2>&1; then
+  run mise run install
+fi
+
+jq -nc --arg worktree "$path" --arg branch "$branch" '{worktree: $worktree, branch: $branch}'
