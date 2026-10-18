@@ -123,4 +123,27 @@ else
   failures=$((failures + 1))
 fi
 
+# The retrospective reads what no round handled, after the merge too.
+feedback() {
+  local name=$1 want=$2 got
+  got=$("$root/sdlc/bin/review-state" --feedback "$tmp/demo" 7 "$url" 2>&1) || got="failed: $got"
+  if [ "$got" = "$want" ]; then
+    echo "ok: $name"
+  else
+    echo "FAIL: $name: want $want, got $got"
+    failures=$((failures + 1))
+  fi
+}
+
+pr MERGED "[{\"id\": 1, \"user\": $me, \"state\": \"COMMENTED\", \"body\": \"Follow-ups: add tests\"}]" '[]' '[]'
+feedback "--feedback lists a review left with the merge" \
+  '[{"id":"review:1","kind":"review","body":"Follow-ups: add tests","url":null}]'
+
+pr MERGED "[{\"id\": 1, \"user\": $me, \"state\": \"APPROVED\", \"body\": \"Ship it. Later: split the script\"}]" '[]' '[]'
+feedback "--feedback lists an approving review's body once the pull request is over" \
+  '[{"id":"review:1","kind":"review","body":"Ship it. Later: split the script","url":null}]'
+
+pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"APPROVED\", \"body\": \"Looks good\"}]" '[]' '[]'
+feedback "--feedback leaves out an approving review while the pull request is open" '[]'
+
 [ "$failures" -eq 0 ] || { echo "$failures failed"; exit 1; }

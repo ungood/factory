@@ -4,13 +4,13 @@
 # and deletes the local branch. The run's state directory stays, as the
 # record of the run.
 #
-# Usage: cleanup <repo> <worktree> <branch>
+# Usage: cleanup <repo> <worktree> <branch> <pull request>
 #
 # <repo> is the path to the checkout the run worked on, relative to the
-# current directory. A worktree with uncommitted changes, or commits its
-# remote branch doesn't have, stays where it is, with its terminals. The step
-# never fails the run: anything it can't remove is logged, and the script
-# exits zero.
+# current directory. <pull request> is the pull request's URL. A worktree with
+# uncommitted changes, or commits that reached neither a remote nor the merged
+# pull request, stays where it is, with its terminals. The step never fails
+# the run: anything it can't remove is logged, and the script exits zero.
 set -uo pipefail
 
 log() { echo "cleanup: $*" >&2; }
@@ -19,6 +19,8 @@ trap 'exit 0' EXIT
 repo=$(git -C "$1" rev-parse --show-toplevel) || exit 0
 worktree=$2
 branch=$3
+# The previous step's output may end in a newline.
+url=$(tr -d "[:space:]" <<<"$4")
 
 if [ -d "$worktree" ]; then
   orca worktree set --worktree "path:$worktree" --comment "merged" \
@@ -29,10 +31,15 @@ if [ -d "$worktree" ]; then
     exit 0
   fi
   # A merged branch's remote is deleted with the merge, so compare with what
-  # was pushed rather than with the remote branch.
+  # was pushed rather than with the remote branch. A squash merge leaves the
+  # branch's commits on no remote, but if HEAD is the merged pull request's
+  # head, everything in the worktree went into it.
   if [ -n "$(git -C "$worktree" rev-list HEAD --not --remotes 2>/dev/null)" ]; then
-    log "leaving $worktree in place, because it has commits that were never pushed"
-    exit 0
+    pr=$(gh pr view "$url" --json state,headRefOid -q '.state + " " + .headRefOid' 2>/dev/null)
+    if [ "$pr" != "MERGED $(git -C "$worktree" rev-parse HEAD)" ]; then
+      log "leaving $worktree in place, because it has commits that never reached the pull request"
+      exit 0
+    fi
   fi
 
   orca terminal close --worktree "path:$worktree" --all --json >/dev/null ||
