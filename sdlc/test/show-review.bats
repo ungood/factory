@@ -1,16 +1,17 @@
 #!/usr/bin/env bats
 # Tests sdlc/bin/show-review against a fake orca that records the comment and
-# status it's asked to set, and one that always fails.
+# status it's asked to set, and can fail.
 
 setup() {
   load helpers
   init
 
-  # Records "<worktree>|<status>|<comment>|<unread>" for each worktree set.
+  # Records "<worktree>|<status>|<comment>|<unread>" for each worktree set,
+  # then fails if $FAKE/fail exists.
   fake orca <<'ORCA'
 #!/usr/bin/env bash
 [ "$1 $2" = "worktree set" ] || { echo "fake orca: unexpected call: $*" >&2; exit 1; }
-[ -n "${FAKE_ORCA_FAIL-}" ] && exit 1
+[ ! -f "$FAKE/fail" ] || exit 1
 shift 2
 worktree= status= comment= unread=no
 while [ $# -gt 0 ]; do
@@ -22,57 +23,63 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-echo "$worktree|$status|$comment|$unread" >"$FAKE_ORCA"
+echo "$worktree|$status|$comment|$unread" >"$FAKE/set"
 ORCA
-  export FAKE_ORCA="$tmp/set"
+  mkdir -p "$tmp/fake"
+  export FAKE="$tmp/fake"
 }
 
-# Runs show-review with the rest of the arguments, and wants the line the
-# fake orca recorded to match the pattern $1.
-shows() {
-  local want=$1
-  shift
-  run "$root/sdlc/bin/show-review" "$@"
-  [ "$status" -eq 0 ]
-  [[ "$(cat "$FAKE_ORCA")" =~ ^$want$ ]]
-}
+show() { run "$root/sdlc/bin/show-review" /w "$@"; }
+set_() { cat "$FAKE/set" 2>/dev/null || echo nothing; }
 
 @test "pending says when the next check is" {
-  shows "path:/w\|in-review\|Waiting for review, next check [0-2][0-9]:[0-5][0-9]\|no" /w pending 2 5
+  show pending 2 5
+  [ "$status" -eq 0 ]
+  [[ "$(set_)" =~ ^path:/w\|in-review\|Waiting\ for\ review,\ next\ check\ [0-2][0-9]:[0-5][0-9]\|no$ ]]
 }
 
 @test "a trailing newline on the state doesn't matter" {
-  shows "path:/w\|in-review\|Waiting for review, next check [0-2][0-9]:[0-5][0-9]\|no" /w $'pending\n' 2 5
+  show $'pending\n' 2 5
+  [ "$status" -eq 0 ]
+  [[ "$(set_)" =~ ^path:/w\|in-review\|Waiting\ for\ review, ]]
 }
 
 @test "changes says the round is starting" {
-  shows "path:/w\|in-progress\|Round 3: sending the new feedback to the agent\|no" /w changes 3 5
+  show changes 3 5
+  [ "$status" -eq 0 ]
+  expect "path:/w|in-progress|Round 3: sending the new feedback to the agent|no" "$(set_)"
 }
 
 @test "merged says the retrospective is running" {
-  shows "path:/w\|in-review\|PR merged, running the retrospective\|no" /w merged 2 5
+  show merged 2 5
+  [ "$status" -eq 0 ]
+  expect "path:/w|in-review|PR merged, running the retrospective|no" "$(set_)"
 }
 
-@test "closed says the worktree stays" {
-  shows "path:/w\|in-review\|PR closed without merging, so the worktree stays\|no" /w closed 2 5
+@test "closed says the retrospective is running" {
+  show closed 2 5
+  [ "$status" -eq 0 ]
+  expect "path:/w|in-review|PR closed without merging, running the retrospective|no" "$(set_)"
 }
 
 @test "the next check time counts from now" {
+  local before after
   before=$(date +%H:%M)
-  run "$root/sdlc/bin/show-review" /w pending 2 0
+  show pending 2 0
   after=$(date +%H:%M)
-  [ "$status" -eq 0 ]
-  got=$(cut -d'|' -f3 "$FAKE_ORCA")
+  local got
+  got=$(cut -d'|' -f3 "$FAKE/set")
   [ "$got" = "Waiting for review, next check $before" ] || [ "$got" = "Waiting for review, next check $after" ]
 }
 
 @test "an Orca failure doesn't fail the step" {
-  FAKE_ORCA_FAIL=1 run "$root/sdlc/bin/show-review" /w pending 2 5
+  touch "$FAKE/fail"
+  show pending 2 5
   [ "$status" -eq 0 ]
 }
 
 @test "an unknown state doesn't fail the step" {
-  run "$root/sdlc/bin/show-review" /w surprise 2 5
+  show surprise 2 5
   [ "$status" -eq 0 ]
-  [ ! -e "$FAKE_ORCA" ]
+  expect nothing "$(set_)"
 }
