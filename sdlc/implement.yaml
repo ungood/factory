@@ -38,5 +38,18 @@ do:
             - ${ $context.issue }
             - ${ $context.title }
             - ${ $context.summary }
+      export:
+        as: '$context + { pullRequest: . }'
+  # Never fails: a failed retrospective is logged, and the pull request stands.
+  - retro:
+      run:
+        shell:
+          command: sdlc/bin/retro "$1" "$2" "$3" "$4" "$5"
+          arguments:
+            - ${ $context.repo }
+            - ${ $context.issue }
+            - ${ $context.worktree }
+            - ${ $context.pullRequest }
+            - ${ $workflow.id }
       output:
-        as: '{ pullRequest: ., branch: $context.branch, worktree: $context.worktree }'
+        as: '{ pullRequest: $context.pullRequest, branch: $context.branch, worktree: $context.worktree, retro: fromjson }'
