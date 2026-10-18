@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Shows in Orca what an implement run's review loop is doing: sets the run's
+# worktree comment and status after each check of the pull request.
+#
+# Usage: show-review <worktree> <review> <round> <minutes>
+#
+# <review> is what review-state printed. <round> is the round that new
+# feedback would start. <minutes> is the wait before the next check, which
+# a pending review's comment counts from now. The step never fails the run:
+# anything Orca can't do is logged, and the script exits zero.
+set -uo pipefail
+
+log() { echo "show-review: $*" >&2; }
+trap 'exit 0' EXIT
+
+worktree=$1
+# The previous step's output may end in a newline.
+review=$(tr -d "[:space:]" <<<"$2")
+round=$3
+minutes=$4
+
+case "$review" in
+  pending)
+    # BSD date on macOS, GNU date elsewhere.
+    next=$(date -v+"${minutes}M" +%H:%M 2>/dev/null || date -d "+$minutes minutes" +%H:%M)
+    status=in-review comment="Waiting for review, next check $next" ;;
+  changes) status=in-progress comment="Round $round: sending the new feedback to the agent" ;;
+  merged) status=in-review comment="PR merged, running the retrospective" ;;
+  closed) status=in-review comment="PR closed without merging, so the worktree stays" ;;
+  *)
+    log "unknown review state $review"
+    exit 0 ;;
+esac
+
+if ! orca worktree set --worktree "path:$worktree" --comment "$comment" \
+  --workspace-status "$status" --json >/dev/null; then
+  log "couldn't update the worktree $worktree in Orca"
+fi

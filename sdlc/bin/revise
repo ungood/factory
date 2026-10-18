@@ -75,7 +75,9 @@ EOF
     orca terminal send --terminal "$terminal" \
       --text "Read $task and do what it says." --enter --wait-submit 30 --json >/dev/null
     touch "$state/sent-$round"
-    orca worktree set --worktree "path:$worktree" --comment "addressing review feedback, round $round" \
+    count=$(jq length "$feedback")
+    orca worktree set --worktree "path:$worktree" \
+      --comment "Round $round: agent working on $count comment$([ "$count" = 1 ] || echo s)" \
       --workspace-status in-progress --json >/dev/null || log "couldn't update the worktree $worktree in Orca"
   fi
 fi
