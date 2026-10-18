@@ -64,7 +64,7 @@ Deterministic checks come first: formatters, linters, static analysis, type chec
 - **Warnings are errors:** for example `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check`.
 - **One formatter entry point:** [treefmt](https://treefmt.com) runs every formatter and file linter from one config, so a repo doesn't wire up each tool separately. `treefmt --ci` is the check. Linters that need the whole project, such as `clippy` and `tsc`, stay as mise tasks.
 - **Markdown** is linted with [rumdl](https://github.com/rvben/rumdl).
-- **Git hooks:** [hk](https://hk.jdx.dev), installed once per machine with `hk install --global --mise`, so repos need no install step. Its pre-commit step calls treefmt, and `clippy` and `tsc` run in pre-push and CI. CI calls `mise run lint` and never depends on the hook tool. See [Hooks and formatters](hooks-and-formatters.md).
+- **Git hooks:** [hk](https://hk.jdx.dev), installed once per machine with `hk install --global --mise`, so repos need no install step. Its pre-commit step calls treefmt, and `clippy` and `tsc` run in pre-push and CI. CI calls `mise run lint` and never depends on the hook tool. See [Hooks and formatters](../research/hooks-and-formatters.md).
 - **Proposed treefmt formatters:** `shellcheck` and `shfmt` for shell, `taplo` for TOML, `actionlint` and `zizmor` for GitHub Actions, `typos` for spelling.
 - **Proposed:** mutation testing with `cargo mutants --in-diff`, and diff coverage with `cargo-llvm-cov`, per the test-integrity gates in my verification research.
 
@@ -92,6 +92,7 @@ Deterministic checks come first: formatters, linters, static analysis, type chec
 ## Docs and writing
 
 - **Short and plain:** comments and docs cover non-obvious constraints. Reasoning goes in the commit message, not in comments.
+- **Decisions vs. research:** settled decisions live in `docs/`. Research, comparisons and open questions live in `research/` and are temporary: once a question is settled, the decision moves into `docs/`.
 - **Agent docs vs. human docs:** `AGENTS.md` holds only what an agent needs to act. Human docs live in `README.md`, `docs/`, or the tracker.
 - **Style:** American spelling, no em dashes, a colon after bold bullet headings. Formal docs use flowing prose; bullets are for discrete items.
 
@@ -99,7 +100,11 @@ Deterministic checks come first: formatters, linters, static analysis, type chec
 
 - **Harness:** Claude Code is primary, but agent config stays tool-independent.
 - **Models:** no xAI; prefer not to use OpenAI.
+- **Agent environment:** [Orca](https://github.com/stablyai/orca) is the terminal and diff surface for agent work, with telemetry turned off. cmux is a close second. Paseo was a good fit but can't be used at work. See [ADEs](../research/ades.md).
 - **Orchestration:** hand work off through Orca terminals and worktrees, not by messaging other sessions.
+- **Workflows:** [marche](marche.md) runs long-lived agent pipelines. Workflows are written in Pkl, rendered to Serverless Workflow 1.0 YAML, and run by Zigflow on Temporal. See [Workflow Languages](../research/workflow-languages.md).
+- **Naming:** factory tools follow the *mise en place* kitchen theme of `mise`, `place` and `marche`.
+- **Review:** agent changes are reviewed in Orca's diff view, with inline comments sent back to the agent. See [Review Tools](../research/review-tools.md).
 - **Skills are project-agnostic:** project bindings go in the repo's agent docs, not in the skill.
 - **Autonomy:** act until truly blocked, fix trivial issues without asking, and implement the agreed design rather than a safer subset.
 
@@ -110,12 +115,14 @@ Personal tools that don't affect what the factory produces:
 - **Terminal:** Ghostty
 - **Editors:** micro in the terminal; VS Code with AI features and telemetry off
 - **Containers:** Colima
-- **OS:** NixOS at home, macOS at work. Nix and home-manager manage machines and dotfiles; mise manages projects. See [Nix and mise](nix-and-mise.md).
+- **OS:** NixOS at home, macOS at work. Nix and home-manager manage machines and dotfiles; mise manages projects. See [Nix and mise](../research/nix-and-mise.md).
 
 ## Open questions
 
 - Whether factory tools should eventually move to the [onetruename](https://github.com/onetruename) org.
-- How far Nix and mise should overlap: see [Nix and mise](nix-and-mise.md).
+- How far Nix and mise should overlap: see [Nix and mise](../research/nix-and-mise.md).
 - What the factory's own dependency update workflow looks like.
 - Rust releases: release-plz (release PRs), or semantic-release with a Cargo plugin to match the TypeScript repos?
 - Which proposed treefmt formatters earn a slot, and is `treefmt.toml` or treefmt-nix the config?
+- Whether to stay on Ghostty outside Orca, and whether Orca's CLI covers what marche needs: see [Terminal Orchestration](../research/terminal-orchestration.md).
+- Whether Temporal is acceptable on a laptop: see [marche](marche.md).

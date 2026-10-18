@@ -1,6 +1,6 @@
 # Agentic Tools
 
-Tools worth considering for the factory's agent layer, as of 2026-10-17. It covers four areas: orchestration, coordination, shared knowledge, and agent configuration. It builds on the earlier research in the memex vault (Software Factory Requirements, Surface Research rounds 1 and 2, Workspaces and Isolation, Knowledge and Memory, the AI Memory Systems Trade Study, and Verification), and on [Toolbox](toolbox.md). Tools those notes already covered are mentioned here only when something has changed.
+Tools worth considering for the factory's agent layer, as of 2026-10-17. It covers four areas: orchestration, coordination, shared knowledge, and agent configuration. It builds on the earlier research in the memex vault (Software Factory Requirements, Surface Research rounds 1 and 2, Workspaces and Isolation, Knowledge and Memory, the AI Memory Systems Trade Study, and Verification), and on [Toolbox](../docs/toolbox.md). Tools those notes already covered are mentioned here only when something has changed.
 
 Every link was checked on 2026-10-17 with `gh api` or a direct fetch. Stars, versions and dates are snapshots from that day. "Release" means the latest tagged release; when a project has none, the last push date is given instead. "mise" means the tool is in the mise registry. Otherwise it usually installs through mise's `github:`, `cargo:` or `npm:` backends.
 
