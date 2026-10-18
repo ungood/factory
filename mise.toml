@@ -16,6 +16,7 @@ config_roots = ["*"]
 "aqua:temporalio/cli" = "1.9.1"
 rumdl = "0.2.79"
 shellcheck = "0.11.0"
+bats = "1.14.0"
 
 [tasks.sync]
 description = "Clone and update the repos listed in place.toml"
@@ -33,13 +34,13 @@ run = [
 description = "Lint the Markdown, the SDLC's scripts and its workflows"
 run = [
   "rumdl check",
-  "shellcheck sdlc/bin/* sdlc/test/*",
+  "shellcheck sdlc/run-tests sdlc/bin/* sdlc/test/*.bats sdlc/test/*.bash",
   "for f in sdlc/*.yaml; do marche validate \"$f\" || exit 1; done",
 ]
 
 [tasks.test]
-description = "Test the SDLC's scripts"
-run = "for t in sdlc/test/*; do \"$t\" || exit 1; done"
+description = "Test the SDLC's scripts against a clean export of HEAD, the way a run gets them"
+run = "sdlc/run-tests"
 
 [tasks."sdlc:server"]
 description = "Run the Temporal dev server that keeps the SDLC's runs"
