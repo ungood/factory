@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Tests sdlc/bin/agent against a fake orca whose agent answers the task it's
+# sent, and a fake gh and mise.
+#
+# Usage: sdlc/test/agent
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/../.." && pwd)
+# Resolved, since the script resolves the repo's path through git.
+tmp=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/agent-test.XXXXXX")" && pwd -P)
+trap 'rm -rf "$tmp"' EXIT
+
+# The fake orca lists the terminals in $FAKE/terminals.json, where a created
+# terminal runs Claude straight away. It logs what it types to $FAKE/sent,
+# and, sent the task, writes $FAKE/answer.json to the result file, as the
+# agent would.
+mkdir -p "$tmp/bin" "$tmp/fake" "$tmp/config" "$tmp/state/factory/agents/demo-7"
+cat >"$tmp/bin/orca" <<'ORCA'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "terminal list") jq -c '{result: {terminals: .}}' "$FAKE/terminals.json" ;;
+  "terminal create")
+    echo '[{"handle": "term_1", "agentIdentity": "claude"}]' >"$FAKE/terminals.json"
+    echo '{"result": {"terminal": {"handle": "term_1"}}}' ;;
+  "terminal wait") echo '{"result": {"wait": {"satisfied": true}}}' ;;
+  "terminal send")
+    echo "$6" >>"$FAKE/sent"
+    if [[ "$6" == Read*task.md* ]]; then cp "$FAKE/answer.json" "$RESULT"; fi ;;
+  "worktree set") ;;
+  *) echo "fake orca: unexpected call: $*" >&2; exit 1 ;;
+esac
+ORCA
+cat >"$tmp/bin/gh" <<'GH'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "repo view") echo ungood/demo ;;
+  *) echo "fake gh: unexpected call: $*" >&2; exit 1 ;;
+esac
+GH
+# The fake mise reports the source checkout's environment, which carries
+# CLAUDE_CONFIG_DIR unless $FAKE/no-config exists.
+cat >"$tmp/bin/mise" <<'MISE'
+#!/usr/bin/env bash
+if [ -f "$FAKE/no-config" ]; then echo '{}'; else jq -cn --arg dir "$FAKE_CONFIG" '{CLAUDE_CONFIG_DIR: $dir}'; fi
+MISE
+chmod +x "$tmp/bin"/*
+
+git init --quiet "$tmp/demo"
+git -C "$tmp/demo" remote add origin https://github.com/ungood/demo.git
+git init --quiet -b ungood/issue-7 "$tmp/worktree"
+
+export MISE_STATE_DIR="${MISE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mise}"
+state="$tmp/state/factory/agents/demo-7"
+export PATH="$tmp/bin:$PATH" FAKE="$tmp/fake" FAKE_CONFIG="$tmp/config" XDG_STATE_HOME="$tmp/state" \
+  FACTORY_POLL_SECONDS=0 RESULT="$state/result.json"
+
+# Starts a run from scratch, with the terminals in $1 and the agent's
+# answer in $2.
+setup() {
+  rm -f "$state"/* "$FAKE"/*
+  echo "# The issue" >"$state/issue.md"
+  echo "$1" >"$FAKE/terminals.json"
+  echo "$2" >"$FAKE/answer.json"
+}
+
+failures=0
+check() {
+  local name=$1 want=$2 got
+  got=$("$root/sdlc/bin/agent" "$tmp/demo" 7 "$tmp/worktree" 2>"$tmp/stderr") ||
+    got="failed: $(tail -n 1 "$tmp/stderr")"
+  if [ "$got" = "$want" ]; then
+    echo "ok: $name"
+  else
+    echo "FAIL: $name: want $want, got $got"
+    failures=$((failures + 1))
+  fi
+}
+fail() {
+  echo "FAIL: $*"
+  failures=$((failures + 1))
+}
+
+done='{"status": "done", "title": "fix: it", "summary": "Fixed."}'
+setup '[]' "$done"
+check "starts Claude on the task and prints its result" '{"status":"done","title":"fix: it","summary":"Fixed."}'
+want=$(printf '%s\n' "env CLAUDE_CONFIG_DIR='$tmp/config' mise x -- claude" "Read $state/task.md and do what it says.")
+if [ "$(cat "$FAKE/sent")" != "$want" ]; then
+  fail "starts Claude with the source checkout's account, then sends the task: want $want, got $(cat "$FAKE/sent")"
+elif [ "$(cat "$state/terminal")" != term_1 ]; then
+  fail "records the agent's terminal"
+elif ! grep -q "issue #7 in ungood/demo, in this worktree on branch \`ungood/issue-7\`" "$state/task.md" ||
+  [ "$(tail -n 1 "$state/task.md")" != "# The issue" ]; then
+  fail "writes the task, with the issue: got $(cat "$state/task.md")"
+else
+  echo "ok: writes the task, starts Claude with the source checkout's account, and sends it the task"
+fi
+
+rm "$FAKE/sent"
+check "a retried step with a result reads it again" '{"status":"done","title":"fix: it","summary":"Fixed."}'
+[ ! -f "$FAKE/sent" ] || fail "a retried step with a result typed into the terminal: $(cat "$FAKE/sent")"
+
+rm "$RESULT"
+echo '[]' >"$FAKE/terminals.json"
+check "a retried step whose terminal is gone fails" \
+  "failed: agent: the agent's terminal term_1 is gone, and there's no $RESULT. Look at $tmp/worktree."
+[ ! -f "$FAKE/sent" ] || fail "a retried step whose terminal is gone started another agent"
+
+setup '[]' '{"status": "blocked", "summary": "stuck"}'
+check "a blocked agent fails the step" "failed: agent: the agent reported blocked: stuck"
+
+setup '[]' "$done"
+touch "$FAKE/no-config"
+check "a source checkout without a Claude account fails" \
+  "failed: agent: $tmp/demo has no CLAUDE_CONFIG_DIR in its mise environment"
+[ ! -f "$FAKE/sent" ] || fail "a source checkout without a Claude account started an agent"
+
+[ "$failures" -eq 0 ] || { echo "$failures failed"; exit 1; }

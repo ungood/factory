@@ -11,15 +11,15 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/await-result-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 # The fake orca lists the terminals in $FAKE_ORCA/terminals.json. Before it
-# answers a list, it runs $FAKE_ORCA/on-list once, if it exists. A wait runs
-# $FAKE_ORCA/on-wait the same way, then answers with the next line of
+# answers a list, it runs the script $FAKE_ORCA/on-list once, if it exists.
+# A wait runs $FAKE_ORCA/on-wait the same way, then answers with the next line of
 # $FAKE_ORCA/waits, true or false.
 mkdir -p "$tmp/bin" "$tmp/orca"
 cat >"$tmp/bin/orca" <<'ORCA'
 #!/usr/bin/env bash
 once() {
   if [ -f "$FAKE_ORCA/$1" ]; then
-    bash "$FAKE_ORCA/$1"
+    "$FAKE_ORCA/$1"
     rm "$FAKE_ORCA/$1"
   fi
 }
@@ -51,6 +51,12 @@ setup() {
   [ "$3" = none ] || echo "$3" >"$result"
 }
 
+# Writes a script for the fake orca to run once, from $2.
+hook() {
+  printf '#!/usr/bin/env bash\n%s\n' "$2" >"$FAKE_ORCA/$1"
+  chmod +x "$FAKE_ORCA/$1"
+}
+
 failures=0
 check() {
   local name=$1 want=$2 got
@@ -68,15 +74,15 @@ setup "$open" true '{"status": "done"}'
 check "a result read once the agent is idle" '{"status":"done"}'
 
 setup "$open" true none
-echo "echo '{\"status\": \"done\"}' >'$result'" >"$FAKE_ORCA/on-list"
+hook on-list "echo '{\"status\": \"done\"}' >'$result'"
 check "waits for the result file to appear" '{"status":"done"}'
 
 setup "$open" true '{"summary": "first"}'
-echo "echo '{\"summary\": \"second\"}' >'$result'" >"$FAKE_ORCA/on-wait"
+hook on-wait "echo '{\"summary\": \"second\"}' >'$result'"
 check "the agent's edits before it goes idle count" '{"summary":"second"}'
 
 setup "$open" "false true" '{"summary": "first"}'
-echo "echo '{\"summary\": \"second\"}' >'$result'" >"$FAKE_ORCA/on-wait"
+hook on-wait "echo '{\"summary\": \"second\"}' >'$result'"
 check "keeps waiting while the agent stays busy" '{"summary":"second"}'
 
 setup '[]' "" '{"status": "done"}'

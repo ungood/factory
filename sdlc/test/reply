@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Tests sdlc/bin/reply against a local remote, a fake gh that records the
+# replies it's asked to post, and a fake orca.
+#
+# Usage: sdlc/test/reply
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/../.." && pwd)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/reply-test.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+
+# The fake gh appends each reply to $FAKE/posted as {where, body}, and fails
+# to post one whose body contains "unpostable".
+mkdir -p "$tmp/bin" "$tmp/fake" "$tmp/state/factory/agents/demo-7"
+cat >"$tmp/bin/gh" <<'GH'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "api -X")
+    body=${6#body=}
+    [[ "$body" != *unpostable* ]] || exit 1
+    jq -cn --arg where "$4" --arg body "$body" '{$where, $body}' >>"$FAKE/posted"
+    echo "https://github.com/ungood/demo/pull/9#discussion_r1" ;;
+  "pr comment")
+    [[ "$5" != *unpostable* ]] || exit 1
+    jq -cn --arg where "$3" --arg body "$5" '{$where, $body}' >>"$FAKE/posted"
+    echo "https://github.com/ungood/demo/pull/9#issuecomment-1" ;;
+  *) echo "fake gh: unexpected call: $*" >&2; exit 1 ;;
+esac
+GH
+cat >"$tmp/bin/orca" <<'ORCA'
+#!/usr/bin/env bash
+echo "$*" >>"$FAKE/orca"
+ORCA
+chmod +x "$tmp/bin"/*
+
+# mise keeps its trusted configs under XDG_STATE_HOME, so keep it pointed at
+# the real one.
+export MISE_STATE_DIR="${MISE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mise}"
+export PATH="$tmp/bin:$PATH" FAKE="$tmp/fake" XDG_STATE_HOME="$tmp/state"
+export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
+export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
+state="$tmp/state/factory/agents/demo-7"
+url=https://github.com/ungood/demo/pull/9
+
+git init --quiet --bare -b main "$tmp/origin.git"
+git clone --quiet "$tmp/origin.git" "$tmp/demo" 2>/dev/null
+git -C "$tmp/demo" commit --quiet --allow-empty -m init
+git -C "$tmp/demo" push --quiet origin main
+git -C "$tmp/demo" worktree add --quiet -b ungood/issue-7 "$tmp/worktree" main
+git -C "$tmp/worktree" push --quiet origin ungood/issue-7
+
+cat >"$state/feedback-2.json" <<'JSON'
+[
+  {"id": "c1", "kind": "inline", "thread": 11, "body": "Rename this."},
+  {"id": "c2", "kind": "conversation", "body": "Why?\nReally?"},
+  {"id": "c3", "kind": "review", "body": "Unpostable."}
+]
+JSON
+cat >"$state/result-2.json" <<'JSON'
+{"status": "done", "replies": [
+  {"id": "c1", "body": "Renamed."},
+  {"id": "c2", "body": "Because."},
+  {"id": "c3", "body": "unpostable"},
+  {"id": "c9", "body": "Not in the feedback."}
+]}
+JSON
+
+failures=0
+fail() {
+  echo "FAIL: $*"
+  failures=$((failures + 1))
+}
+reply() { "$root/sdlc/bin/reply" "$tmp/demo" 7 "$tmp/worktree" "$url"$'\n' 2 2>"$tmp/stderr"; }
+
+git -C "$tmp/worktree" commit --quiet --allow-empty -m "fix: rename"
+if ! reply; then
+  fail "a round of replies fails: $(cat "$tmp/stderr")"
+fi
+marker='<!-- factory:reply -->'
+want=$(jq -cn --arg m "$marker" --arg url "$url" '
+  {where: "repos/ungood/demo/pulls/9/comments/11/replies", body: "Renamed.\n\n\($m)"},
+  {where: $url, body: "> Why?\n> Really?\n\nBecause.\n\n\($m)"}')
+if [ "$(cat "$FAKE/posted")" = "$want" ]; then
+  echo "ok: replies in an inline comment's thread, and quotes other feedback"
+else
+  fail "replies in an inline comment's thread, and quotes other feedback: want $want, got $(cat "$FAKE/posted")"
+fi
+if [ "$(git -C "$tmp/origin.git" rev-parse ungood/issue-7)" = "$(git -C "$tmp/worktree" rev-parse HEAD)" ]; then
+  echo "ok: pushes the round's fixes"
+else
+  fail "pushes the round's fixes"
+fi
+if grep -q "worktree set --worktree path:$tmp/worktree .*--workspace-status in-review" "$FAKE/orca"; then
+  echo "ok: moves the worktree back to in-review"
+else
+  fail "moves the worktree back to in-review: got $(cat "$FAKE/orca")"
+fi
+if grep -q c9 "$tmp/stderr"; then
+  echo "ok: a reply to feedback that wasn't in the round is logged and skipped"
+else
+  fail "a reply to feedback that wasn't in the round is logged and skipped"
+fi
+
+rm "$FAKE/posted"
+jq '(.replies[] | select(.id == "c3")).body = "Fine."' "$state/result-2.json" >"$tmp/result" &&
+  mv "$tmp/result" "$state/result-2.json"
+reply || fail "a retried round fails: $(cat "$tmp/stderr")"
+want=$(jq -cn --arg m "$marker" --arg url "$url" '{where: $url, body: "> Unpostable.\n\nFine.\n\n\($m)"}')
+if [ "$(cat "$FAKE/posted")" = "$want" ]; then
+  echo "ok: a retried round posts only what it couldn't post before"
+else
+  fail "a retried round posts only what it couldn't post before: want $want, got $(cat "$FAKE/posted")"
+fi
+
+rm -rf "$tmp/origin.git"
+if reply; then
+  fail "a failed push fails the step"
+else
+  echo "ok: a failed push fails the step"
+fi
+
+[ "$failures" -eq 0 ] || { echo "$failures failed"; exit 1; }
