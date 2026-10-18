@@ -50,10 +50,25 @@ path=$(jq -r '.path' <<<"$worktree")
 branch=$(jq -r '.branch | sub("^refs/heads/"; "")' <<<"$worktree")
 
 terminals() { orca terminal list --worktree "id:$worktree_id" --json | jq -c '.result.terminals'; }
+has_terminal() { terminals | jq -e --arg t "$1" 'any(.[]; .handle == $t)' >/dev/null; }
+
+# orca terminal wait exits non-zero when it times out, so read satisfied
+# from its output instead of letting set -e end the script.
+wait_for() {
+  orca terminal wait --terminal "$1" --for "$2" --timeout-ms "$3" --json 2>/dev/null |
+    jq -r '.result.wait.satisfied // false' || true
+}
 
 if [ ! -f "$result" ]; then
-  terminal=$(terminals | jq -r '[.[] | select(.agentIdentity == "claude")][0].handle // empty')
-  if [ -z "$terminal" ]; then
+  # The handle of the terminal Claude was started in. A retried step reuses
+  # it rather than starting a second agent.
+  if [ -f "$state/terminal" ]; then
+    terminal=$(cat "$state/terminal")
+    if ! has_terminal "$terminal"; then
+      log "the agent's terminal $terminal is gone, and there's no $result. Look at $path."
+      exit 1
+    fi
+  else
     # Orca's worktrees live outside the workplace, so the workplace's
     # untracked mise.local.toml doesn't reach them. Carry over the Claude
     # account the source checkout uses.
@@ -83,6 +98,7 @@ EOF
       terminal=$(orca terminal create --worktree "id:$worktree_id" --title "$name" --json |
         jq -r '.result.terminal.handle')
     fi
+    echo "$terminal" >"$state/terminal"
     orca terminal send --terminal "$terminal" \
       --text "env CLAUDE_CONFIG_DIR='$config_dir' mise x -- claude" --enter --json >/dev/null
 
@@ -92,9 +108,7 @@ EOF
       [ "$(terminals | jq -r --arg t "$terminal" '.[] | select(.handle == $t) | .agentIdentity')" = claude ] && break
       sleep 1
     done
-    ready=$(orca terminal wait --terminal "$terminal" --for tui-idle --timeout-ms 120000 --json |
-      jq -r '.result.wait.satisfied')
-    if [ "$ready" != true ]; then
+    if [ "$(wait_for "$terminal" tui-idle 120000)" != true ]; then
       log "Claude didn't become ready in $path"
       exit 1
     fi
@@ -104,12 +118,13 @@ EOF
       --workspace-status in-progress --json >/dev/null || true
   fi
 
+  # Claude runs inside the terminal's shell, so the terminal outlives it.
+  # Only a closed terminal means nobody can finish the work.
   log "waiting for $result"
   while [ ! -f "$result" ]; do
-    exited=$(orca terminal wait --terminal "$terminal" --for exit --timeout-ms 10000 --json |
-      jq -r '.result.wait.satisfied')
-    if [ "$exited" = true ] && [ ! -f "$result" ]; then
-      log "the agent's terminal exited without writing $result"
+    sleep 10
+    if [ ! -f "$result" ] && ! has_terminal "$terminal"; then
+      log "the agent's terminal closed without writing $result"
       exit 1
     fi
   done
