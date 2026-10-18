@@ -19,7 +19,7 @@
 # With --feedback, prints the new feedback instead, as a JSON array of
 # {"id", "kind", "body", "url"}, where an inline comment adds "path", "line"
 # and "thread", the comment to reply to. Feedback a round has handled is
-# listed by ID in the run's state directory, in `handled`. The workflow's own
+# listed by ID in the run's state directory, in `handled`. The agent's
 # replies carry a marker, so they're never mistaken for feedback. Once the
 # pull request is merged or closed, --feedback still lists what no round
 # handled, such as a review left with the merge, for the retrospective, and

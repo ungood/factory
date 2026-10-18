@@ -8,8 +8,9 @@
 # <repo> is the path to the checkout the run worked on, relative to the
 # current directory. <round> counts the agent's passes: the first was round
 # 1, so the first round of feedback is round 2. The round's feedback goes to
-# feedback-<round>.json in the run's state directory, and the agent writes
-# result-<round>.json there, with the replies the workflow posts for it.
+# feedback-<round>.json in the run's state directory. The agent pushes its
+# fixes, posts its own replies, each with a marker so review-state doesn't
+# take it for new feedback, and writes result-<round>.json there.
 # Prints the result as JSON. Exits non-zero when the agent reports it's
 # blocked, or when the agent's terminal no longer runs Claude: this script
 # never starts a new agent.
@@ -22,11 +23,18 @@ issue=$2
 worktree=$3
 url=$(tr -d "[:space:]" <<<"$4")
 round=$5
+if ! [[ "$url" =~ ^https://github\.com/([^/]+/[^/]+)/pull/([0-9]+)$ ]]; then
+  echo "revise: $url isn't a pull request URL" >&2
+  exit 1
+fi
+nwo=${BASH_REMATCH[1]}
+number=${BASH_REMATCH[2]}
 bin=$(cd "$(dirname "$0")" && pwd)
 state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
 feedback="$state/feedback-$round.json"
 task="$state/review-$round.md"
 result="$state/result-$round.json"
+marker='<!-- factory:reply -->'
 
 log() { echo "revise: $*" >&2; }
 
@@ -58,13 +66,15 @@ if [ ! -f "$result" ]; then
     cat >"$task" <<EOF
 The reviewer left feedback on $url, the pull request for this work. It's in \`$feedback\`, as a JSON array. Each item has an \`id\`, its \`kind\` (\`inline\` for a comment on a line of the diff, \`review\` for a review's summary, \`conversation\` for a comment on the pull request), the \`body\` and its \`url\`. An inline comment also has its \`path\` and \`line\`.
 
-Address each item: make the change, or decide that you disagree. Run the repo's checks, which are \`mise run ci\` if the repo defines a \`ci\` task, or else \`mise run lint\` and \`mise run test\` where they exist, and fix what fails. Commit your work with conventional commit messages. Don't push, and don't reply on GitHub yourself; the workflow pushes, then posts your replies.
+Address each item: make the change, or decide that you disagree. Run the repo's checks, which are \`mise run ci\` if the repo defines a \`ci\` task, or else \`mise run lint\` and \`mise run test\` where they exist, and fix what fails. Commit your work with conventional commit messages, and push it. Don't bypass the repo's git hooks: if the pre-push hook fails, fix what it reports and push again.
+
+Then reply to each item on GitHub with what you did, or why you disagree. Reply to an inline comment in its thread, with \`gh api -X POST repos/$nwo/pulls/$number/comments/<thread>/replies -f body=<reply>\`, where \`<thread>\` is the item's \`thread\`. Reply to any other item with a comment on the pull request that quotes it. End every reply with the line \`$marker\`, so the workflow doesn't take your reply for new feedback.
 
 When you're done, write this JSON to \`$result\`:
 
-    {"status": "done", "summary": "<what changed in this round>", "replies": [{"id": "<the item's id>", "body": "<Markdown reply>"}]}
+    {"status": "done", "summary": "<what changed in this round>"}
 
-Reply to each item with what you did, or why you disagree. If you're blocked and need a person, write {"status": "blocked", "summary": "<what's blocking you>"} instead.
+If you're blocked and need a person, write {"status": "blocked", "summary": "<what's blocking you>"} instead.
 
 Writing the result file must be your last action: the workflow reads it as soon as you're back at your prompt. Write it to \`$result.tmp\` first, then \`mv\` it into place, so the workflow never sees a half-written file.
 EOF

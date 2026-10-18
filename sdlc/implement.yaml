@@ -42,31 +42,27 @@ do:
             as: ${ fromjson }
           export:
             as: '$context + .'
-      - gate:
+      # The agent commits, pushes and opens the pull request itself, and CI
+      # on the pull request is the gate. This checks only what the workflow
+      # can see, hands any problem back to the agent once, then fails.
+      - check:
           run:
             shell:
-              command: sdlc/bin/gate "$1"
+              command: sdlc/bin/check-pr "$1" "$2" "$3" "$4" "$5"
               arguments:
-                - ${ $context.worktree }
-      - pullRequest:
-          run:
-            shell:
-              command: sdlc/bin/open-pr "$1" "$2" "$3" "$4"
-              arguments:
-                - ${ $context.worktree }
+                - ${ $context.repo }
                 - ${ $context.issue }
-                - ${ $context.title }
-                - ${ $context.summary }
+                - ${ $context.worktree }
+                - ${ $context.pullRequest // "" }
+                - '1'
           export:
             as: '$context + { pullRequest: . }'
       # Never fails: if Orca can't be updated, that's logged, and the run goes on.
       - announce:
           run:
             shell:
-              command: sdlc/bin/announce-pr "$1" "$2" "$3" "$4"
+              command: sdlc/bin/announce-pr "$1" "$2"
               arguments:
-                - ${ $context.repo }
-                - ${ $context.issue }
                 - ${ $context.worktree }
                 - ${ $context.pullRequest }
       # The review loop. The agent's first pass was round 1, and each round of
@@ -145,16 +141,10 @@ do:
                 - ${ $context.worktree }
                 - ${ $context.pullRequest }
                 - ${ $context.round + 1 | tostring }
-      - regate:
+      - recheck:
           run:
             shell:
-              command: sdlc/bin/gate "$1"
-              arguments:
-                - ${ $context.worktree }
-      - reply:
-          run:
-            shell:
-              command: sdlc/bin/reply "$1" "$2" "$3" "$4" "$5"
+              command: sdlc/bin/check-pr "$1" "$2" "$3" "$4" "$5"
               arguments:
                 - ${ $context.repo }
                 - ${ $context.issue }

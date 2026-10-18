@@ -13,6 +13,7 @@ Each section separates what's decided from what's only proposed. Proposals are s
 - **Outer and inner workflows:** a workplace repo has an outer workflow, and each repo has an inner workflow that the outer one can start. A workplace repo is still a repo, so it has an inner workflow of its own.
 - **Standard workflows are shared:** inner workflows extend standard Pkl workflows, so every Rust project can use the same one. The standard workflows belong to the org, probably in its `.github` repo next to the shared CI workflows. They aren't part of marche.
 - **Skills and workflows split the work:** interactive work, such as turning an idea into an issue, is a skill. Anything with gates, waits or ordering is a marche workflow.
+- **The forge enforces, workflows orchestrate:** the forge enforces the rules, with CI as a required check, branch protection and merge permissions. Git and agent hooks give early feedback. The SDLC workflows only orchestrate: agents own judgment and actions, such as committing, pushing, opening PRs and replying to review, and a workflow checks only what it can observe of the result.
 - **Repos own their PRs:** each repo merges its own PRs. Dependencies between PRs are checks on the PRs themselves, not decisions made by the outer workflow.
 - **Done means deployed:** a change isn't finished until it's deployed and verified.
 
@@ -113,7 +114,7 @@ The build loop covers writing tests through to a PR whose checks pass.
 
 ## PR feedback
 
-Once a PR is waiting on me, I give feedback through PR review comments. The workflow listens for my review, addresses each comment, re-runs the checks, replies, and pushes. It goes on until the PR is merged or closed. Merging is the approval, so an approving review without a merge changes nothing.
+Once a PR is waiting on me, I give feedback through PR review comments. The workflow listens for my review and hands it to the agent, which addresses each comment, runs the checks, pushes, and replies. It goes on until the PR is merged or closed. Merging is the approval, so an approving review without a merge changes nothing.
 
 Changes made after my review don't get another full agentic review. My review is the review.
 
@@ -121,7 +122,7 @@ The same agent session resumes so it keeps its context. Falling back to a fresh 
 
 ## Learning
 
-Each run ends with a retrospective. A separate agent reviews how the run went (what the agent got wrong or retried, what the gate caught, what I corrected) and proposes issues: bugs to fix or features to add, in the SDLC itself or in the repo it worked on. It files each one in the repo where it belongs, and triage takes it from there. The retrospective never fails the run.
+Each run ends with a retrospective. A separate agent reviews how the run went (what the agent got wrong or retried, what the hooks and checks caught, what I corrected) and proposes issues: bugs to fix or features to add, in the SDLC itself or in the repo it worked on. It files each one in the repo where it belongs, and triage takes it from there. The retrospective never fails the run.
 
 A later routine can work across runs, deduplicating proposals and promoting repeated lessons into hooks, checks and standards. That routine isn't designed yet.
 
@@ -131,19 +132,17 @@ The SDLC starts as the smallest workflow marche can run today and grows as march
 
 ### Version 0
 
-[`sdlc/implement.yaml`](../sdlc/implement.yaml) takes an issue through a PR and my review of it, until I merge it. The agent writes tests, implements and commits in its own worktree, a gate runs the checks, and the workflow opens the PR. Then it loops on my review, handing each round of feedback back to the same agent, until I merge or close the PR. A retrospective files issues from what went wrong, and a merge cleans up.
+[`sdlc/implement.yaml`](../sdlc/implement.yaml) takes an issue through a PR and my review of it, until I merge it. The agent writes tests, implements and commits in its own worktree, then pushes and opens a draft PR, whose CI is the gate. The workflow only checks that the PR matches the worktree. Then it loops on my review, handing each round of feedback back to the same agent, which pushes its fixes and posts its replies, until I merge or close the PR. A retrospective files issues from what went wrong, and a merge cleans up.
 
 Each step has its own doc in [`sdlc/docs`](../sdlc/docs), named after the script it runs, and a change to a step edits only that step's doc. `implement.yaml` is the authority on the order. The steps are:
 
 - [Prepare](../sdlc/docs/prepare.md): creates the worktree and installs the repo's tools.
 - [Agent](../sdlc/docs/agent.md): runs Claude on the issue in a terminal I can watch.
-- [Gate](../sdlc/docs/gate.md): runs the repo's checks on what the agent committed.
-- [Pull request](../sdlc/docs/open-pr.md): pushes the branch and opens a draft PR.
+- [Check](../sdlc/docs/check-pr.md): checks that the agent's PR exists, matches the worktree's `HEAD`, and leaves nothing uncommitted.
 - [Announce](../sdlc/docs/announce-pr.md): tells Orca and the agent about the PR.
 - [Review](../sdlc/docs/review-state.md): waits for my review, until I merge or close the PR.
 - [Show review](../sdlc/docs/show-review.md): shows in Orca what the review loop is doing.
-- [Revise](../sdlc/docs/revise.md): sends my feedback to the agent.
-- [Reply](../sdlc/docs/reply.md): pushes and replies to my feedback.
+- [Revise](../sdlc/docs/revise.md): sends my feedback to the agent, which pushes and replies.
 - [Retrospective](../sdlc/docs/retro.md): files issues from the run's friction.
 - [End](../sdlc/docs/end-run.md): shows that a run ended without a merge.
 - [Cleanup](../sdlc/docs/cleanup.md): removes the worktree after a merge.
@@ -155,7 +154,7 @@ Everything else is still manual: I triage, including the `retro` issues, plan in
 A repo opts in to the SDLC through its mise tasks:
 
 - **`install`:** optional. Whatever a fresh checkout needs beyond `mise install`, such as `node_modules` or generated code. Prepare runs it.
-- **`ci`:** the repo's checks. The gate runs `ci` if the repo defines it, or else `lint` and `test`, each where it exists.
+- **`ci`:** the repo's checks. The agent runs `ci` if the repo defines it, or else `lint` and `test`, each where it exists. CI on the PR runs the same checks, and it's the gate.
 
 This repo defines `lint` and `test`, and its [tests](../sdlc/docs/run-tests.md) run the SDLC's scripts the way a run does. [isthmia](https://github.com/cyc-seattle/isthmia) defines `install` and `ci`.
 

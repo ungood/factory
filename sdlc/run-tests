@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Runs the SDLC's tests against a clean export of HEAD, so file modes and
 # missing files look the way a run sees them. A chmod or a new file that
-# isn't committed doesn't count. The gate fails on uncommitted changes, so
-# what's committed is everything a run gets.
+# isn't committed doesn't count. A run's check fails on uncommitted changes,
+# so what's committed is everything a run gets.
 #
 # Usage: sdlc/run-tests [<test>...]
 #
 # Each <test> is a bats file relative to the repo, such as
-# sdlc/test/gate.bats. With none, runs every test in sdlc/test.
+# sdlc/test/check-pr.bats. With none, runs every test in sdlc/test.
 set -euo pipefail
 
 # Git hooks run with GIT_DIR and the like set to the repo being pushed, which
