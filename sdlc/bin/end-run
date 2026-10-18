@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Shows that an implement run ended without a merge, so a run that has
+# stopped never looks like one that's waiting: sets the Orca worktree's
+# comment and status, and tells the agent in its terminal that the run is
+# over and nothing more will come. The worktree stays.
+#
+# Usage: end-run closed <repo> <issue> <worktree> <pull request>
+#        end-run faulted <repo> <issue> <worktree> <run> <error>
+#
+# <repo> is the path to the checkout the run worked on, relative to the
+# current directory. <pull request> is the pull request's URL. <run> is the
+# marche run's workflow ID, and <error> is the error the run faulted with, as
+# JSON. A run that faulted before it had a worktree passes an empty
+# <worktree>. A review that timed out is a fault too. The step never fails
+# the run: anything Orca can't do is logged, and the script exits zero.
+set -uo pipefail
+
+log() { echo "end-run: $*" >&2; }
+trap 'exit 0' EXIT
+
+ending=$1
+repo=$(git -C "$2" rev-parse --show-toplevel) || exit 0
+issue=$3
+worktree=$4
+state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
+unread=()
+
+case "$ending" in
+  closed)
+    # The previous step's output may end in a newline.
+    url=$(tr -d "[:space:]" <<<"$5")
+    number=${url##*/}
+    status=completed
+    comment="PR #$number closed without merging; worktree kept"
+    text="PR #$number was closed without merging, so this run is over and the workflow won't send anything more. The worktree stays." ;;
+  faulted)
+    run=$5
+    error=$6
+    field() { jq -r --arg f "$1" '.[$f] // empty | tostring' <<<"$error" 2>/dev/null; }
+    type=$(field type)
+    title=$(field title)
+    instance=$(field instance)
+    # One line, cut short, since it's typed into the terminal.
+    detail=$(field detail | tr -s '[:space:]' ' ' | sed -E 's/^ //; s/ $//')
+    [ "${#detail}" -le 300 ] || detail="${detail:0:300}…"
+    # The task the error came from, under the workflow's outermost try: in
+    # /do/1/implement/try/7/reviewState/try/0/check, that's reviewState.
+    if [[ "$instance" == */try/* ]]; then
+      step=${instance#*/try/}
+      step=${step#*/}
+      step=${step%%/*}
+    else
+      step=${instance##*/}
+    fi
+    status=todo
+    unread=(--unread)
+    if [ "$type" = https://github.com/ungood/factory/errors/review-timed-out ]; then
+      comment="Run ended: $title"
+      lead="The run ended: $title."
+    elif [ -n "$title" ]; then
+      comment="Run faulted${step:+ in $step}: $title"
+      lead="The run faulted${step:+ in $step}: $title."
+    else
+      comment="Run faulted"
+      lead="The run faulted."
+    fi
+    comment+="; worktree kept"
+    text="$lead${detail:+ $detail} The workflow won't send anything more; \`marche show $run\` has the details." ;;
+  *)
+    log "unknown ending $ending"
+    exit 0 ;;
+esac
+
+if [ -z "$worktree" ]; then
+  log "the run has no worktree to update in Orca"
+elif ! orca worktree set --worktree "path:$worktree" --comment "$comment" \
+  --workspace-status "$status" ${unread[@]+"${unread[@]}"} --json >/dev/null; then
+  log "couldn't update the worktree $worktree in Orca"
+fi
+
+if [ ! -f "$state/terminal" ]; then
+  log "there's no $state/terminal, so the agent won't hear that the run ended"
+  exit 0
+fi
+terminal=$(cat "$state/terminal")
+if ! orca terminal send --terminal "$terminal" --text "$text" --enter --json >/dev/null; then
+  log "couldn't tell the agent's terminal $terminal that the run ended"
+fi
