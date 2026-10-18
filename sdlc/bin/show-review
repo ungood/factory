@@ -26,7 +26,7 @@ case "$review" in
     status=in-review comment="Waiting for review, next check $next" ;;
   changes) status=in-progress comment="Round $round: sending the new feedback to the agent" ;;
   merged) status=in-review comment="PR merged, running the retrospective" ;;
-  closed) status=in-review comment="PR closed without merging, so the worktree stays" ;;
+  closed) status=in-review comment="PR closed without merging, running the retrospective" ;;
   *)
     log "unknown review state $review"
     exit 0 ;;
