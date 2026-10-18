@@ -33,6 +33,15 @@ fails_with() {
   [ "$status" -eq 0 ]
 }
 
+# Git hooks, such as hk's pre-push, run with GIT_DIR and the like set to
+# the repo being pushed, which would point the tests' own git at it.
+@test "this commit passes from inside another repo's git hook" {
+  git init --quiet "$tmp/other"
+  GIT_DIR="$tmp/other/.git" GIT_WORK_TREE="$tmp/other" GIT_INDEX_FILE="$tmp/other/.git/index" \
+    run "$clone/sdlc/run-tests" sdlc/test/workflow.bats sdlc/test/review-state.bats
+  [ "$status" -eq 0 ]
+}
+
 @test "a commit that drops a script's executable bit fails, though the working tree has it" {
   git -C "$clone" update-index --chmod=-x "$bin/reply"
   git -C "$clone" commit --quiet -m "drop reply's executable bit"
