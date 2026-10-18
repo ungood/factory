@@ -9,12 +9,12 @@
 #
 # - pending: nothing new from the reviewer since the last round
 # - changes: new review comments, or a review that requests changes
-# - approved: the reviewer approved, with nothing new to address
-# - closed: the pull request was merged or closed
+# - merged: the pull request was merged
+# - closed: the pull request was closed without merging
 #
-# The author of a pull request can't approve it on GitHub, and the workflow
-# opens pull requests as the reviewer. So besides an approving review, a
-# review or comment whose first line is `/approve` counts as approval.
+# The workflow never merges. Whoever merges the pull request approves it, and
+# the forge decides who may. An approving review without a merge is still
+# pending, though comments that come with it are feedback.
 #
 # With --feedback, prints the new feedback instead, as a JSON array of
 # {"id", "kind", "body", "url"}, where an inline comment adds "path", "line"
@@ -43,7 +43,7 @@ number=${BASH_REMATCH[2]}
 
 pr_state=$(gh pr view "$url" --json state -q .state)
 if [ "$mode" = state ] && [ "$pr_state" != OPEN ]; then
-  echo closed
+  if [ "$pr_state" = MERGED ]; then echo merged; else echo closed; fi
   exit 0
 fi
 
@@ -62,36 +62,32 @@ items=$(jq -cn \
   --argjson reviews "$reviews" \
   --argjson comments "$comments" \
   --argjson conversation "$conversation" '
-  def approves: ((. // "") + "\n") | split("\n")[0] | gsub("^\\s+|\\s+$"; "") == "/approve";
   def ours: (.body // "") | contains("<!-- factory:reply -->");
   # A pending review is the reviewer'"'"'s unsent draft, which GitHub shows
   # only to its author: the account the workflow runs as.
   ([$reviews[] | select(.state == "PENDING") | .id]) as $drafts
   | [
       ($reviews[]
-        | select(.user.login == $reviewer and .state != "PENDING" and (ours | not))
-        | {id: "review:\(.id)", kind: "review", body: (.body // ""), url: .html_url,
-           approval: (.state == "APPROVED" or (.body | approves)),
-           feedback: (.state == "CHANGES_REQUESTED" or ((.body // "") != "" and (.body | approves | not) and .state != "APPROVED"))}),
+        | select(.user.login == $reviewer and (ours | not))
+        # An approval waits for the merge, and an empty review only holds
+        # inline comments, which count on their own.
+        | select(.state == "CHANGES_REQUESTED" or (.state == "COMMENTED" and (.body // "") != ""))
+        | {id: "review:\(.id)", kind: "review", body: (.body // ""), url: .html_url}),
       ($comments[]
         | select(.user.login == $reviewer and (ours | not))
         | select(.pull_request_review_id as $r | $drafts | index($r) | not)
         | {id: "comment:\(.id)", kind: "inline", body, url: .html_url,
-           path, line: (.line // .original_line), thread: (.in_reply_to_id // .id),
-           approval: false, feedback: true}),
+           path, line: (.line // .original_line), thread: (.in_reply_to_id // .id)}),
       ($conversation[]
         | select(.user.login == $reviewer and (ours | not))
-        | {id: "conversation:\(.id)", kind: "conversation", body, url: .html_url,
-           approval: (.body | approves), feedback: (.body | approves | not)})
+        | {id: "conversation:\(.id)", kind: "conversation", body, url: .html_url})
     ]
   | map(select(.id as $id | $handled | index($id) | not))')
 
 if [ "$mode" = feedback ]; then
-  jq -c 'map(select(.feedback or .approval) | del(.feedback, .approval))' <<<"$items"
-elif jq -e 'any(.[]; .feedback)' <<<"$items" >/dev/null; then
+  echo "$items"
+elif [ "$(jq length <<<"$items")" -gt 0 ]; then
   echo changes
-elif jq -e 'any(.[]; .approval)' <<<"$items" >/dev/null; then
-  echo approved
 else
   echo pending
 fi

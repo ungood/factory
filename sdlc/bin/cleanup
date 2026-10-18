@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Cleans up after an implement run whose pull request is merged or closed:
-# closes the agent's Orca terminals, removes the worktree and deletes the
-# local branch. The run's state directory stays, as the record of the run.
+# Cleans up after an implement run whose pull request is merged: marks the
+# Orca worktree completed, closes the agent's terminals, removes the worktree
+# and deletes the local branch. The run's state directory stays, as the
+# record of the run.
 #
 # Usage: cleanup <repo> <worktree> <branch>
 #
@@ -20,6 +21,8 @@ worktree=$2
 branch=$3
 
 if [ -d "$worktree" ]; then
+  orca worktree set --worktree "path:$worktree" --comment "merged" \
+    --workspace-status completed --json >/dev/null || log "couldn't update the worktree $worktree in Orca"
   if [ -n "$(git -C "$worktree" status --porcelain)" ]; then
     log "leaving $worktree in place, because it has uncommitted changes:"
     git -C "$worktree" status --short >&2
@@ -42,7 +45,7 @@ if [ -d "$worktree" ]; then
 fi
 
 # Orca deletes the branch with the worktree only when it can prove it's
-# merged, which a closed pull request's branch isn't.
+# merged, which a squash or rebase merge's branch isn't.
 if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
   if git -C "$repo" worktree list --porcelain | grep -qxF "branch refs/heads/$branch"; then
     log "keeping the branch $branch, which is still checked out"

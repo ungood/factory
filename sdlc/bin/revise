@@ -56,7 +56,7 @@ if [ ! -f "$result" ]; then
 
   if [ ! -f "$state/sent-$round" ]; then
     cat >"$task" <<EOF
-The reviewer left feedback on $url, the pull request for this work. It's in \`$feedback\`, as a JSON array. Each item has an \`id\`, its \`kind\` (\`inline\` for a comment on a line of the diff, \`review\` for a review's summary, \`conversation\` for a comment on the pull request), the \`body\` and its \`url\`. An inline comment also has its \`path\` and \`line\`. An item whose body starts with \`/approve\` is an approval that came with other feedback; it needs no reply, and the reviewer will approve again once they've seen your changes.
+The reviewer left feedback on $url, the pull request for this work. It's in \`$feedback\`, as a JSON array. Each item has an \`id\`, its \`kind\` (\`inline\` for a comment on a line of the diff, \`review\` for a review's summary, \`conversation\` for a comment on the pull request), the \`body\` and its \`url\`. An inline comment also has its \`path\` and \`line\`.
 
 Address each item: make the change, or decide that you disagree. Run \`mise run lint\` and \`mise run test\` if those tasks exist, and fix what fails. Commit your work with conventional commit messages. Don't push, and don't reply on GitHub yourself; the workflow pushes, then posts your replies.
 
@@ -88,8 +88,7 @@ EOF
   done
 fi
 
-# The round handled everything it was sent, including any approval that came
-# with feedback, which the reviewer gives again after seeing the changes.
+# The round handled everything it was sent.
 jq -r '.[].id' "$feedback" >>"$state/handled"
 
 jq -c . "$result"

@@ -53,7 +53,7 @@ description = "Run the marche worker that executes the SDLC's runs"
 run = "marche worker"
 
 [tasks.implement]
-description = "Take a GitHub issue through a pull request and its review to a merge"
+description = "Take a GitHub issue through a pull request and its review until a person merges it"
 usage = '''
 arg "<repo>" help="Path to the repo's checkout, such as place or ."
 arg "<issue>" help="The issue number"

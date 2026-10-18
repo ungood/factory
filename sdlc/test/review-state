@@ -65,10 +65,10 @@ pr OPEN '[]' '[]' '[]'
 check "a pull request with no reviews is pending" pending
 
 pr MERGED '[]' '[]' '[]'
-check "a merged pull request is closed" closed
+check "a merged pull request is merged" merged
 
 pr CLOSED '[]' '[]' '[]'
-check "a closed pull request is closed" closed
+check "a pull request closed without merging is closed" closed
 
 pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"COMMENTED\", \"body\": \"\"}]" \
   "[{\"id\": 11, \"user\": $me, \"pull_request_review_id\": 1, \"body\": \"Rename this\", \"path\": \"a\", \"line\": 3}]" '[]'
@@ -83,21 +83,15 @@ check "a review's body asks for changes" changes
 pr OPEN '[]' '[]' "[{\"id\": 5, \"user\": $me, \"body\": \"Also update the docs\"}]"
 check "a conversation comment asks for changes" changes
 
-pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"APPROVED\", \"body\": \"\"}]" '[]' '[]'
-check "an approving review approves" approved
+pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"APPROVED\", \"body\": \"Looks good\"}]" '[]' '[]'
+check "an approving review waits for the merge" pending
 
-pr OPEN '[]' '[]' "[{\"id\": 5, \"user\": $me, \"body\": \"  /approve  \nThanks\"}]"
-check "a conversation comment starting with /approve approves" approved
-
-pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"COMMENTED\", \"body\": \"/approve\"}]" '[]' '[]'
-check "a review starting with /approve approves" approved
-
-pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"COMMENTED\", \"body\": \"/approve\"}]" \
+pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"APPROVED\", \"body\": \"\"}]" \
   "[{\"id\": 11, \"user\": $me, \"pull_request_review_id\": 1, \"body\": \"Fix the typo first\", \"path\": \"a\", \"line\": 3}]" '[]'
-check "an approval with new comments asks for changes first" changes
+check "an approving review's inline comments ask for changes" changes
 
-pr OPEN "[{\"id\": 1, \"user\": $them, \"state\": \"APPROVED\", \"body\": \"\"}]" '[]' \
-  "[{\"id\": 5, \"user\": $them, \"body\": \"/approve\"}, {\"id\": 6, \"user\": $them, \"body\": \"Delete everything\"}]"
+pr OPEN "[{\"id\": 1, \"user\": $them, \"state\": \"CHANGES_REQUESTED\", \"body\": \"\"}]" '[]' \
+  "[{\"id\": 6, \"user\": $them, \"body\": \"Delete everything\"}]"
 check "only the reviewer's reviews count" pending
 
 pr OPEN "[{\"id\": 1, \"user\": $me, \"state\": \"PENDING\", \"body\": \"Draft\"}]" \

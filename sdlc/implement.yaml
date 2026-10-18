@@ -3,7 +3,7 @@ document:
   namespace: factory
   name: implement
   version: '0.1.0'
-  summary: Take a GitHub issue through a pull request and its review to a merge.
+  summary: Take a GitHub issue through a pull request and its review until a person merges it.
 do:
   # Input: {"repo": "<path to a checkout>", "issue": <number>}
   - remember:
@@ -51,7 +51,8 @@ do:
             - ${ $context.worktree }
             - ${ $context.pullRequest }
   # The review loop. The agent's first pass was round 1, and each round of
-  # the reviewer's feedback is the next. The run waits up to 7 days for each
+  # the reviewer's feedback is the next. The workflow never merges: whoever
+  # merges the pull request approves it. The run waits up to 7 days for each
   # review.
   - startReview:
       set:
@@ -87,14 +88,13 @@ do:
           limit:
             duration:
               hours: 1
+      export:
+        as: '$context + { review: . }'
   - decide:
       switch:
-        - closed:
-            when: . == "closed"
+        - over:
+            when: . == "merged" or . == "closed"
             then: retro
-        - approved:
-            when: . == "approved"
-            then: merge
         - changes:
             when: . == "changes"
             then: revise
@@ -137,17 +137,9 @@ do:
       then: awaitReview
   - expire:
       set:
-        expired: true
+        review: expired
       export:
         as: '$context + .'
-      then: retro
-  - merge:
-      run:
-        shell:
-          command: sdlc/bin/merge "$1" "$2"
-          arguments:
-            - ${ $context.worktree }
-            - ${ $context.pullRequest }
   # Never fails: a failed retrospective is logged, and the pull request stands.
   - retro:
       run:
@@ -163,11 +155,14 @@ do:
         as: '$context + { retro: fromjson }'
   - finish:
       switch:
-        - expired:
-            when: $context.expired == true
-            then: giveUp
-        - done:
+        - merged:
+            when: $context.review == "merged"
             then: cleanup
+        - expired:
+            when: $context.review == "expired"
+            then: giveUp
+        - closed:
+            then: closed
   # Never fails: anything it can't remove is logged and left in place.
   - cleanup:
       run:
@@ -178,7 +173,17 @@ do:
             - ${ $context.worktree }
             - ${ $context.branch }
       output:
-        as: '{ pullRequest: $context.pullRequest, branch: $context.branch, rounds: $context.round, retro: $context.retro }'
+        as: '{ pullRequest: $context.pullRequest, review: $context.review, rounds: $context.round, retro: $context.retro }'
+      then: end
+  # A pull request closed without merging keeps its worktree, in case the
+  # work is wanted after all.
+  - closed:
+      set:
+        pullRequest: ${ $context.pullRequest }
+        review: ${ $context.review }
+        rounds: ${ $context.round }
+        retro: ${ $context.retro }
+        worktree: ${ $context.worktree }
       then: end
   - giveUp:
       raise:

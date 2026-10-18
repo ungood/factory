@@ -94,7 +94,7 @@ schema=$(jq -cn --arg factory "$factory_nwo" --arg repo "$repo_nwo" '{
 
 prompt=$(
   cat <<EOF
-You're reviewing how a run of the factory's implement workflow went, so that the next run goes better. The run took issue #$issue in $repo_nwo to the pull request $pr. An agent worked in $worktree, then a gate ran the repo's checks, then the workflow opened the pull request. Then the run waited for the reviewer: each round of their feedback went back to the same agent, the gate ran again, and the workflow pushed and posted the agent's replies, until the reviewer approved and the workflow merged, or the pull request was closed.
+You're reviewing how a run of the factory's implement workflow went, so that the next run goes better. The run took issue #$issue in $repo_nwo to the pull request $pr. An agent worked in $worktree, then a gate ran the repo's checks, then the workflow opened the pull request. Then the run waited for the reviewer: each round of their feedback went back to the same agent, the gate ran again, and the workflow pushed and posted the agent's replies, until the reviewer merged the pull request, which is their approval, or closed it.
 
 The run's record is in the current directory:
 
