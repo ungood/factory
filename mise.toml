@@ -10,9 +10,6 @@ config_roots = ["*"]
 [tools]
 "packslip:github.com/ungood/place" = "0.1.0"
 
-[hooks]
-enter = { task = "sync" }
-
 [tasks.sync]
 description = "Clone and update the repos listed in place.toml"
 run = "place sync"
