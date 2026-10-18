@@ -1,0 +1,4 @@
+# Gitignored files Orca copies from the primary checkout into each new
+# worktree. mise.local.toml carries machine-specific settings such as
+# CLAUDE_CONFIG_DIR, which a worktree outside the workplace can't otherwise see.
+mise.local.toml
