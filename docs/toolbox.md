@@ -72,6 +72,7 @@ Deterministic checks come first: formatters, linters, static analysis, type chec
 
 - **License:** MIT. A `LICENSE` file ("Copyright (c) <year> Jason Walker") plus the manifest field (`license = "MIT"`). Not Apache-2.0, and not the Rust-conventional dual license.
 - **Default branch:** `main`. PRs and release tags target it.
+- **Merged branches:** GitHub deletes a PR's head branch when it merges (`delete_branch_on_merge`). Turn it on when creating a repo.
 - **Forge:** GitHub under `ungood`. CI runs on GitHub Actions, and projects are tracked in GitHub Issues.
 - **Commits:** conventional prefixes (`feat:`, `fix:`, `chore:`), signed through 1Password. Never bypass signing. PR titles are checked for the same format.
 - **Releases:** automated from conventional commits. The cyc-seattle repos run semantic-release on every push to `main`. Rust releases still need a matching choice (see open questions).
