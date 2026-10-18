@@ -17,6 +17,8 @@ config_roots = ["*"]
 rumdl = "0.2.79"
 shellcheck = "0.11.0"
 bats = "1.14.0"
+hk = { version = "2.7.0", workflow = "release.yml" }
+actionlint = "1.7.12"
 
 [tasks.sync]
 description = "Clone and update the repos listed in place.toml"
@@ -31,11 +33,12 @@ run = [
 ]
 
 [tasks.lint]
-description = "Lint the Markdown, the SDLC's scripts and its workflows"
+description = "Lint the Markdown, the SDLC's scripts and workflows, and the CI workflows"
 run = [
   "rumdl check",
   "shellcheck sdlc/run-tests sdlc/bin/* sdlc/test/*.bats sdlc/test/*.bash",
   "for f in sdlc/*.yaml; do marche validate \"$f\" || exit 1; done",
+  "actionlint",
 ]
 
 [tasks.test]
