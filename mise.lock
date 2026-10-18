@@ -67,3 +67,13 @@ checksum = "sha256:1327b46fb42093e193abcff4400f6c8d2e3c6d67ab0bbc9af83e9ebad65d8
 url = "https://github.com/ungood/place/releases/download/v0.1.0/place-0.1.0-darwin-arm64.tar.gz"
 signer = "sigstore-oidc:https://github.com/ungood/place/.github/workflows/release.yml"
 repository_ids = { repository = "1220981254" }
+
+[[tools.rumdl]]
+version = "0.2.79"
+backend = "aqua:rvben/rumdl"
+specifiers = ["0.2.79"]
+
+[[tools.shellcheck]]
+version = "0.11.0"
+backend = "aqua:koalaman/shellcheck"
+specifiers = ["0.11.0"]

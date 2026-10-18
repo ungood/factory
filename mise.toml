@@ -14,6 +14,8 @@ config_roots = ["*"]
 "packslip:github.com/ungood/marche" = "0.2.0"
 # The Temporal CLI, whose dev server keeps the SDLC's runs.
 "aqua:temporalio/cli" = "1.9.1"
+rumdl = "0.2.79"
+shellcheck = "0.11.0"
 
 [tasks.sync]
 description = "Clone and update the repos listed in place.toml"
@@ -25,6 +27,14 @@ depends = ["//...:build"]
 run = [
   "mise link --force packslip:github.com/ungood/place@local place/target/debug",
   "mise use --env local packslip:github.com/ungood/place@local",
+]
+
+[tasks.lint]
+description = "Lint the Markdown, the SDLC's scripts and its workflows"
+run = [
+  "rumdl check",
+  "shellcheck sdlc/bin/*",
+  "for f in sdlc/*.yaml; do marche validate \"$f\" || exit 1; done",
 ]
 
 [tasks."sdlc:server"]

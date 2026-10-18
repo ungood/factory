@@ -1,0 +1,5 @@
+[global]
+# marche and place are separate repos with their own lint.
+exclude = ["marche", "place"]
+# Prose is one line per paragraph, wrapped by the editor.
+disable = ["MD013"]
