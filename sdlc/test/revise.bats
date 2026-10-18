@@ -55,6 +55,13 @@ revise() { run --separate-stderr "$root/sdlc/bin/revise" "$tmp/demo" 7 /worktree
   expect "Read $state/review-2.md and do what it says." "$(cat "$FAKE/sent")"
 }
 
+@test "the task says to push, and to reply to each item with the marker" {
+  revise
+  grep -qF "Commit your work with conventional commit messages, and push it." "$state/review-2.md"
+  grep -qF "gh api -X POST repos/ungood/demo/pulls/9/comments/<thread>/replies" "$state/review-2.md"
+  grep -qF "End every reply with the line \`<!-- factory:reply -->\`" "$state/review-2.md"
+}
+
 @test "writes the round's feedback, and records it as handled" {
   revise
   expect '[{"kind":"inline","body":"Rename this."}]' "$(jq -c '[.[] | {kind, body}]' "$state/feedback-2.json")"

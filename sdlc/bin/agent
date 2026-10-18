@@ -5,8 +5,9 @@
 # Usage: agent <repo> <issue> <worktree>
 #
 # <repo> is a path to a checkout, relative to the current directory, and
-# <worktree> is the Orca worktree prepare made for the issue. Prints the
-# result as JSON: {"status", "title", "summary"}. Exits non-zero when the
+# <worktree> is the Orca worktree prepare made for the issue. The agent
+# commits, pushes and opens the pull request itself. Prints the result as
+# JSON: {"status", "pullRequest", "summary"}. Exits non-zero when the
 # agent reports it's blocked or the terminal exits without a result.
 #
 # A retried step finds the terminal and result from the first attempt and
@@ -60,11 +61,13 @@ if [ ! -f "$result" ]; then
     cat >"$state/task.md" <<EOF
 You're working on issue #$issue in $nwo, in this worktree on branch \`$branch\`. The issue follows this section.
 
-Write failing tests first wherever the repo has tests, then implement. Run the repo's checks, which are \`mise run ci\` if the repo defines a \`ci\` task, or else \`mise run lint\` and \`mise run test\` where they exist, and fix what fails. Document a change in the doc for the step or feature you changed, such as a doc next to its script or test, rather than in an overview that other changes edit too. In ungood/factory, each SDLC step has its own doc in \`sdlc/docs\`, named after its script. Don't renumber a list to make room for a new item. Commit your work with conventional commit messages. Don't push or open a pull request; the workflow does that after running its own checks.
+Write failing tests first wherever the repo has tests, then implement. Run the repo's checks, which are \`mise run ci\` if the repo defines a \`ci\` task, or else \`mise run lint\` and \`mise run test\` where they exist, and fix what fails. Document a change in the doc for the step or feature you changed, such as a doc next to its script or test, rather than in an overview that other changes edit too. In ungood/factory, each SDLC step has its own doc in \`sdlc/docs\`, named after its script. Don't renumber a list to make room for a new item. Commit your work with conventional commit messages.
+
+Then push the branch and open a draft pull request with a conventional title. Its body summarizes the change and ends with \`Closes #$issue\`. If the repo has a pull request template, such as \`.github/pull_request_template.md\`, follow it. Don't bypass the repo's git hooks: if the pre-push hook fails, fix what it reports and push again. CI on the pull request runs the repo's checks, and the workflow checks that the pull request's head is your \`HEAD\` and that nothing is left uncommitted.
 
 When you're done, write this JSON to \`$result\`:
 
-    {"status": "done", "title": "<conventional PR title>", "summary": "<Markdown summary for the PR>"}
+    {"status": "done", "pullRequest": "<the pull request's URL>", "summary": "<what you did>"}
 
 If you're blocked and need a person, write {"status": "blocked", "summary": "<what's blocking you>"} instead. A person may be watching this terminal and may take over; if they do, follow their lead.
 

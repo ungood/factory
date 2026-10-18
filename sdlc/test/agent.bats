@@ -47,7 +47,7 @@ MISE
   mkdir -p "$tmp/fake" "$tmp/config" "$state"
   echo "# The issue" >"$state/issue.md"
   echo '[]' >"$tmp/fake/terminals.json"
-  echo '{"status": "done", "title": "fix: it", "summary": "Fixed."}' >"$tmp/fake/answer.json"
+  echo '{"status": "done", "pullRequest": "https://github.com/ungood/demo/pull/9", "summary": "Fixed."}' >"$tmp/fake/answer.json"
   export FAKE="$tmp/fake" FAKE_CONFIG="$tmp/config" XDG_STATE_HOME="$tmp/state" \
     FACTORY_POLL_SECONDS=0 RESULT="$state/result.json"
 }
@@ -57,7 +57,7 @@ agent() { run --separate-stderr "$root/sdlc/bin/agent" "$tmp/demo" 7 "$tmp/workt
 @test "starts Claude on the task and prints its result" {
   agent
   [ "$status" -eq 0 ]
-  expect '{"status":"done","title":"fix: it","summary":"Fixed."}' "$output"
+  expect '{"status":"done","pullRequest":"https://github.com/ungood/demo/pull/9","summary":"Fixed."}' "$output"
 }
 
 @test "starts Claude with the source checkout's account, then sends the task" {
@@ -79,12 +79,20 @@ agent() { run --separate-stderr "$root/sdlc/bin/agent" "$tmp/demo" 7 "$tmp/workt
   grep -qF "Don't renumber a list" "$state/task.md"
 }
 
+@test "the task says to push and open a draft pull request that closes the issue" {
+  agent
+  grep -qF "push the branch and open a draft pull request" "$state/task.md"
+  grep -qF "ends with \`Closes #7\`" "$state/task.md"
+  grep -qF "pull request template" "$state/task.md"
+  grep -qF "Don't bypass the repo's git hooks" "$state/task.md"
+}
+
 @test "a retried step with a result reads it again, and types nothing" {
   agent
   rm "$FAKE/sent"
   agent
   [ "$status" -eq 0 ]
-  expect '{"status":"done","title":"fix: it","summary":"Fixed."}' "$output"
+  expect '{"status":"done","pullRequest":"https://github.com/ungood/demo/pull/9","summary":"Fixed."}' "$output"
   [ ! -f "$FAKE/sent" ]
 }
 

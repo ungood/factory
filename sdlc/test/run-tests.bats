@@ -43,40 +43,40 @@ fails_with() {
 }
 
 @test "a commit that drops a script's executable bit fails, though the working tree has it" {
-  git -C "$clone" update-index --chmod=-x "$bin/reply"
-  git -C "$clone" commit --quiet -m "drop reply's executable bit"
-  chmod +x "$clone/$bin/reply"
-  fails_with "$bin/reply, which a workflow runs, is committed with mode 100644, not 100755"
+  git -C "$clone" update-index --chmod=-x "$bin/revise"
+  git -C "$clone" commit --quiet -m "drop revise's executable bit"
+  chmod +x "$clone/$bin/revise"
+  fails_with "$bin/revise, which a workflow runs, is committed with mode 100644, not 100755"
 }
 
 @test "a working tree that drops a script's executable bit passes, since the commit has it" {
-  chmod -x "$clone/$bin/reply"
+  chmod -x "$clone/$bin/revise"
   run "$clone/sdlc/run-tests" sdlc/test/workflow.bats
   [ "$status" -eq 0 ]
 }
 
 @test "a test that runs a script through bash fails" {
   # shellcheck disable=SC2016 # The line is for the test, which expands it.
-  printf '\nbash "$root/%s/gate"\n' "$bin" >>"$clone/sdlc/test/gate.bats"
-  git -C "$clone" commit --quiet -am "run gate through bash"
-  fails_with 'sdlc/test/gate.bats'
-  [[ "$output" == *"bash \"\$root/$bin/gate\""* ]]
+  printf '\nbash "$root/%s/check-pr"\n' "$bin" >>"$clone/sdlc/test/check-pr.bats"
+  git -C "$clone" commit --quiet -am "run check-pr through bash"
+  fails_with 'sdlc/test/check-pr.bats'
+  [[ "$output" == *"bash \"\$root/$bin/check-pr\""* ]]
 }
 
 @test "a workflow that runs a script no test runs fails" {
-  cp "$clone/$bin/gate" "$clone/$bin/untested"
-  sed "s#$bin/gate#$bin/untested#" "$clone/sdlc/implement.yaml" >"$clone/sdlc/untested.yaml"
+  cp "$clone/$bin/check-pr" "$clone/$bin/untested"
+  sed "s#$bin/check-pr#$bin/untested#" "$clone/sdlc/implement.yaml" >"$clone/sdlc/untested.yaml"
   git -C "$clone" add "$bin/untested" sdlc/untested.yaml
   git -C "$clone" commit --quiet -m "run a script no test runs"
   fails_with "$bin/untested, which a workflow runs, isn't run by path in any test"
 }
 
 @test "a workflow that runs a script that's only in the working tree fails" {
-  cp "$clone/$bin/gate" "$clone/$bin/uncommitted"
-  sed "s#$bin/gate#$bin/uncommitted#" "$clone/sdlc/implement.yaml" >"$clone/sdlc/uncommitted.yaml"
+  cp "$clone/$bin/check-pr" "$clone/$bin/uncommitted"
+  sed "s#$bin/check-pr#$bin/uncommitted#" "$clone/sdlc/implement.yaml" >"$clone/sdlc/uncommitted.yaml"
   # shellcheck disable=SC2016 # The line is for the test, which expands it.
-  printf '\n"$root/%s/uncommitted"\n' "$bin" >>"$clone/sdlc/test/gate.bats"
-  git -C "$clone" add sdlc/uncommitted.yaml sdlc/test/gate.bats
+  printf '\n"$root/%s/uncommitted"\n' "$bin" >>"$clone/sdlc/test/check-pr.bats"
+  git -C "$clone" add sdlc/uncommitted.yaml sdlc/test/check-pr.bats
   git -C "$clone" commit --quiet -m "run a script that isn't committed"
   fails_with "$bin/uncommitted, which a workflow runs, isn't committed"
 }

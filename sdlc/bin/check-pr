@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Checks what the workflow can observe after the agent's pass: the branch has
+# a pull request, its head is the worktree's HEAD, and nothing is
+# uncommitted. The agent commits, pushes and opens the pull request itself,
+# and CI on the pull request runs the repo's checks, so this is no gate.
+#
+# Usage: check-pr <repo> <issue> <worktree> <pull request> <round>
+#
+# <repo> is the path to the checkout the run worked on, relative to the
+# current directory. <pull request> is the URL the agent reported, or empty
+# to find the branch's pull request. <round> is the agent's pass: 1 for the
+# first, 2 for the first round of feedback, and so on.
+#
+# If a check fails, the problems go to the agent's terminal once, as
+# check-<round>.md in the run's state directory, and the agent writes
+# check-<round>.json there when it's done. If the checks still fail, the
+# step fails, and the run escalates to a person. Prints the pull request's
+# URL. A retried step doesn't ask the agent twice.
+set -euo pipefail
+
+repo=$(git -C "$1" rev-parse --show-toplevel)
+issue=$2
+worktree=$3
+# The previous step's output may end in a newline.
+url=$(tr -d "[:space:]" <<<"$4")
+round=$5
+bin=$(cd "$(dirname "$0")" && pwd)
+state="${XDG_STATE_HOME:-$HOME/.local/state}/factory/agents/$(basename "$repo")-$issue"
+task="$state/check-$round.md"
+result="$state/check-$round.json"
+
+log() { echo "check-pr: $*" >&2; }
+
+# Sets $found to the problems, if there are any, and $url to the pull
+# request's URL.
+check() {
+  local dirty pr head
+  found=
+  dirty=$(git -C "$worktree" status --short)
+  if [ -n "$dirty" ]; then
+    found+="The worktree has uncommitted changes:"$'\n\n'"    ${dirty//$'\n'/$'\n'    }"$'\n\n'
+  fi
+  # Without a URL, gh finds the pull request for the worktree's branch.
+  if ! pr=$(cd "$worktree" && gh pr view ${url:+"$url"} --json url,headRefOid 2>/dev/null); then
+    found+="There's no pull request for the branch \`$(git -C "$worktree" branch --show-current)\`."$'\n\n'
+    return
+  fi
+  url=$(jq -r '.url' <<<"$pr")
+  head=$(git -C "$worktree" rev-parse HEAD)
+  if [ "$(jq -r '.headRefOid' <<<"$pr")" != "$head" ]; then
+    found+="$url's head is $(jq -r '.headRefOid' <<<"$pr"), but the worktree's HEAD is $head."$'\n\n'
+  fi
+}
+
+check
+if [ -n "$found" ] && [ ! -f "$result" ]; then
+  if [ ! -f "$state/terminal" ]; then
+    log "there's no $state/terminal, so there's no agent to fix these problems:"$'\n'"$found"
+    exit 1
+  fi
+  terminal=$(cat "$state/terminal")
+  if [ ! -f "$state/sent-check-$round" ]; then
+    cat >"$task" <<EOF
+The workflow checked your work and found problems:
+
+$found
+Commit your work, push it, and open a draft pull request that closes issue #$issue if the branch doesn't have one. Don't bypass the repo's git hooks; fix what they report.
+
+When you're done, write this JSON to \`$result\`:
+
+    {"status": "done", "summary": "<what you fixed>"}
+
+If you're blocked and need a person, write {"status": "blocked", "summary": "<what's blocking you>"} instead.
+
+Writing the result file must be your last action: the workflow reads it as soon as you're back at your prompt. Write it to \`$result.tmp\` first, then \`mv\` it into place, so the workflow never sees a half-written file.
+EOF
+    # Wait for Claude's prompt, so the message isn't typed into a busy
+    # session. After ten minutes, send it anyway, and Claude queues it.
+    orca terminal wait --terminal "$terminal" --for tui-idle --timeout-ms 600000 --json >/dev/null 2>&1 || true
+    log "sending round $round's problems to $terminal"
+    orca terminal send --terminal "$terminal" \
+      --text "Read $task and do what it says." --enter --wait-submit 30 --json >/dev/null
+    touch "$state/sent-check-$round"
+  fi
+fi
+
+if [ -f "$state/sent-check-$round" ]; then
+  answer=$("$bin/await-result" "$result" "$(cat "$state/terminal")" "path:$worktree")
+  status=$(jq -r '.status' <<<"$answer")
+  if [ "$status" != "done" ]; then
+    log "the agent reported $status: $(jq -r '.summary' <<<"$answer")"
+    exit 1
+  fi
+  check
+  if [ -n "$found" ]; then
+    log "the agent didn't fix these problems:"$'\n'"$found"
+    exit 1
+  fi
+fi
+
+if [ "$round" -gt 1 ]; then
+  orca worktree set --worktree "path:$worktree" --comment "PR #${url##*/} is ready for another review (round $round)" \
+    --workspace-status in-review --unread --json >/dev/null || log "couldn't update the worktree $worktree in Orca"
+fi
+echo "$url"

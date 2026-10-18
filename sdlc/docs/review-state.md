@@ -6,7 +6,7 @@ Right away, then every five minutes, the `reviewState` step runs [`sdlc/bin/revi
 
 What happens next depends on the state:
 
-- **Changes:** the agent addresses the feedback in a new round, through [revise](revise.md), the [gate](gate.md) and [reply](reply.md). The first round of feedback is round 2, because the agent's first pass was round 1.
+- **Changes:** the agent addresses the feedback in a new round, through [revise](revise.md), where it pushes its fixes and posts its replies, and then the [check](check-pr.md). The first round of feedback is round 2, because the agent's first pass was round 1.
 - **Merged:** the merge is the approval. The run moves on to the [retrospective](retro.md) and then [cleans up](cleanup.md).
 - **Closed:** the run moves on to the retrospective, then [ends](end-run.md) and leaves the worktree.
 - **No review for 7 days:** the run ends without merging and [says so](end-run.md), after the retrospective. The PR and its worktree stay.

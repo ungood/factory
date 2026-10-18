@@ -110,25 +110,25 @@ schema=$(jq -cn --arg factory "$factory_nwo" --arg repo "$repo_nwo" '
 
 prompt=$(
   cat <<EOF
-You're reviewing how a run of the factory's implement workflow went, so that the next run goes better. The run took issue #$issue in $repo_nwo to the pull request $pr. An agent worked in $worktree, then a gate ran the repo's checks, then the workflow opened the pull request. Then the run waited for the reviewer: each round of their feedback went back to the same agent, the gate ran again, and the workflow pushed and posted the agent's replies, until the reviewer merged the pull request, which is their approval, or closed it.
+You're reviewing how a run of the factory's implement workflow went, so that the next run goes better. The run took issue #$issue in $repo_nwo to the pull request $pr. An agent worked in $worktree, committed, pushed and opened the pull request, and CI on the pull request ran the repo's checks. The workflow checked that the pull request's head was the worktree's HEAD and nothing was uncommitted, and handed any problem back to the agent once. Then the run waited for the reviewer: each round of their feedback went back to the same agent, which pushed its fixes and posted its own replies, and the workflow checked again, until the reviewer merged the pull request, which is their approval, or closed it.
 
 The run's record is in the current directory:
 
 - \`issue.md\`: the issue, which is also the end of the agent's task.
 - \`result.json\`: the result file the agent wrote.
-- \`feedback-<n>.json\` and \`result-<n>.json\`, if there are any: round <n>'s review feedback, which the reviewer wrote, and the agent's result for it, with its replies. The first round of feedback is round 2.
+- \`feedback-<n>.json\` and \`result-<n>.json\`, if there are any: round <n>'s review feedback, which the reviewer wrote, and the agent's result for it. The first round of feedback is round 2.
 - \`unhandled.json\`: the reviewer's feedback that no round handled, such as a review left with the merge, as a JSON array of items with their \`body\` and \`url\`.
 - \`pr.diff\`: the pull request's diff.
 - \`transcripts/\`: the agent's Claude session transcripts for the worktree, as JSONL. They can be large, so search them rather than reading them whole.
 - \`run.json\`: the marche run's tasks, with their outputs and errors.
-- \`logs/<step>/\`: each step's standard output and error, one pair of files per attempt. \`logs/gate/\` is the gate's output, and \`logs/agent/\` includes the task the agent was given.
+- \`logs/<step>/\`: each step's standard output and error, one pair of files per attempt. \`logs/check/\` and \`logs/recheck/\` are the workflow's checks of the pull request, and \`logs/agent/\` includes the task the agent was given.
 
 The workflow's own definition and scripts are in the factory workplace, $workplace, under \`sdlc/\`. The repo the run worked on is checked out at $worktree.
 
 Look for friction in the run:
 
 - what the agent got wrong, retried or went around in circles on
-- what the gate caught
+- what the git hooks, CI or the workflow's checks caught
 - where the task, the issue or the scripts were unclear
 - what a person had to fix by hand, which shows in the transcript as a person typing into the session
 - what the reviewer asked to change that the agent could have got right the first time
@@ -137,7 +137,7 @@ Turn the friction into at most three proposed issues, each a bug to fix or a fea
 
 File each issue where it belongs: $factory_nwo for the SDLC itself (the workflow, its scripts, and the agent's task), or $repo_nwo for problems in that repo. Before proposing one, check that repo's open issues with \`gh issue list -R <repo> --state open\` and skip anything already covered.
 
-Each issue's body must cite the evidence from this run: quote the transcript, the gate's output or the diff, and say which file it came from. Then say what should change. Write plainly and briefly. Don't link the pull request; that's added for you.
+Each issue's body must cite the evidence from this run: quote the transcript, a step's output or the diff, and say which file it came from. Then say what should change. Write plainly and briefly. Don't link the pull request; that's added for you.
 
 Separately, the reviewer may have left ideas for follow-up work in \`unhandled.json\`. Propose each idea as its own follow-up issue, in \`followUps\` rather than \`issues\`, with the \`url\` of the item it came from as its \`comment\`. Follow-ups don't count toward the three issues, so never drop one to make room. File each where it belongs, the same way, and skip only an idea an open issue already covers. The body should state the reviewer's idea, quoting them, and add what this run shows about it. Feedback in \`unhandled.json\` that isn't an idea for follow-up work, such as a request to change this pull request, is friction to consider for \`issues\` instead.
 EOF
