@@ -1,0 +1,9 @@
+# Orca's per-repo settings. Reference: https://github.com/stablyai/orca/blob/main/docs/site/content/docs/model/orca-yaml.mdx
+scripts:
+  # Each worktree is a new path, so mise has to be told to trust its config
+  # (including the mise.local.toml copied in by .worktreeinclude).
+  setup: |
+    mise trust --yes
+    mise install
+# The agent starts after setup, so it sees the worktree's mise environment.
+setupAgentStartupPolicy: wait-for-setup
