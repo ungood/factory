@@ -3,3 +3,6 @@ url = "https://github.com/ungood/place.git"
 
 [repos.marche]
 url = "https://github.com/ungood/marche.git"
+
+[repos.badbot]
+url = "https://github.com/ungood/badbot.git"

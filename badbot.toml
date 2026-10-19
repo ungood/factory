@@ -1,0 +1,15 @@
+# badbot's routes for this workplace: which repos it watches for the SDLC's
+# PRs, and whose reviews and comments count. See ungood/badbot's README.
+allow = ["ungood"]
+
+[repos."ungood/factory"]
+path = "."
+
+[repos."ungood/place"]
+path = "place"
+
+[repos."ungood/marche"]
+path = "marche"
+
+[repos."ungood/badbot"]
+path = "badbot"

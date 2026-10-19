@@ -26,7 +26,7 @@ Entries marked **Proposed** are suggestions I haven't confirmed yet.
 ## Languages
 
 - **Rust** is the default for CLI tools.
-- **TypeScript** for web.
+- **TypeScript** for web, and for tools that run on Cloudflare Workers, such as [badbot](https://github.com/ungood/badbot).
 - **Python** for data work and scripts.
 - **Not Go.**
 
@@ -74,7 +74,7 @@ Deterministic checks come first: formatters, linters, static analysis, type chec
 - **Default branch:** `main`. PRs and release tags target it.
 - **Merged branches:** GitHub deletes a PR's head branch when it merges (`delete_branch_on_merge`). Turn it on when creating a repo.
 - **Forge:** GitHub under `ungood`. CI runs on GitHub Actions, and projects are tracked in GitHub Issues.
-- **Commits:** conventional prefixes (`feat:`, `fix:`, `chore:`), signed through 1Password. Never bypass signing. PR titles are checked for the same format.
+- **Commits:** conventional prefixes (`feat:`, `fix:`, `chore:`), signed through 1Password. Never bypass signing. Agents commit as `ungood[bot]`, which can't sign, so its commits are the one unsigned exception. PR titles are checked for the same format.
 - **Releases:** automated from conventional commits. The cyc-seattle repos run semantic-release on every push to `main`. Rust releases still need a matching choice (see open questions).
 - **Shared CI:** reusable workflows live in the org's `.github` repo and are pinned by tag.
 - **PRs:** opened as drafts from a feature branch. Related work from one session goes in one PR.
@@ -104,7 +104,9 @@ Deterministic checks come first: formatters, linters, static analysis, type chec
 - **Agent environment:** [Orca](https://github.com/stablyai/orca) is the terminal and diff surface for agent work, with telemetry turned off. cmux is a close second. Paseo was a good fit but can't be used at work. See [ADEs](../research/ades.md).
 - **Orchestration:** hand work off through Orca terminals and worktrees, not by messaging other sessions.
 - **Workflows:** [marche](marche.md) runs long-lived agent pipelines. Workflows are Open Workflow Specification YAML, written in Pkl from marche's M2, and run by marche's Rust interpreter on Temporal. Temporal's dev server runs on the laptop as a user service. See [Workflow Languages](../research/workflow-languages.md).
-- **Naming:** factory tools follow the *mise en place* kitchen theme of `mise`, `place` and `marche`.
+- **Events:** [badbot](https://github.com/ungood/badbot) wakes the Orca agent that owns a PR when it gets a review, fails CI, conflicts or falls behind its base. The routes for this workplace are in `badbot.toml`.
+- **Agent identity:** agents act on GitHub as `ungood[bot]`, badbot's GitHub App, in `ungood` repos. Their commits, PRs and comments are the bot's, so I can review and approve them. Other owners' repos and my own shell keep my identity.
+- **Naming:** factory tools follow the *mise en place* kitchen theme of `mise`, `place` and `marche`. badbot is the exception: it's a pun on `ungood`.
 - **Review:** agent changes are reviewed in Orca's diff view, with inline comments sent back to the agent. See [Review Tools](../research/review-tools.md).
 - **Skills are project-agnostic:** project bindings go in the repo's agent docs, not in the skill.
 - **Autonomy:** act until truly blocked, fix trivial issues without asking, and implement the agreed design rather than a safer subset.
