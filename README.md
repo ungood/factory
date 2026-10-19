@@ -16,6 +16,12 @@ Trusting `mise.toml` installs [place](https://github.com/ungood/place) and runs 
 
 To work on place itself, run `mise run link`. It builds the `place/` checkout and makes this workplace use that build.
 
+## Docs
+
+- [Toolbox](docs/toolbox.md): the tools, defaults, and preferences agents should use.
+- [marche](docs/marche.md): the factory's workflow engine.
+- [SDLC](docs/sdlc.md): the planned workflows that take an idea from an issue to deployed, verified code.
+
 ## Checks
 
 CI runs `mise run lint` and `mise run test` on every pull request and on pushes to `main`, and `main` requires them to pass before a merge.
