@@ -1,6 +1,7 @@
 # Each repo in place.toml needs a line here.
 /marche/
 /place/
+/badbot/
 
 mise.local.toml
 mise.local.lock
